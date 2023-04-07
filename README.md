@@ -14,4 +14,4 @@ You need a dimmable Zigbee light bulb.
 - IOT Core
 - AWS VPC
 - Event Bridge
-- 
+- AWS Secrets Manager (IOT Core MQTT credentials)

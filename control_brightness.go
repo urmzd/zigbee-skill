@@ -6,6 +6,7 @@ import (
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
 
@@ -72,14 +73,10 @@ func toJSON(obj interface{}) string {
 
 func getCurrentBrightness(client mqtt.Client, device string) (int, error) {
 	var brightness int
+	messageChannel := make(chan mqtt.Message)
+
 	token := client.Subscribe("zigbee2mqtt/"+device, 0, func(client mqtt.Client, msg mqtt.Message) {
-		var deviceData map[string]interface{}
-		if err := json.Unmarshal(msg.Payload(), &deviceData); err != nil {
-			return
-		}
-		if b, ok := deviceData["brightness"].(float64); ok {
-			brightness = int(b)
-		}
+		messageChannel <- msg
 	})
 	token.Wait()
 
@@ -87,7 +84,26 @@ func getCurrentBrightness(client mqtt.Client, device string) (int, error) {
 		return 0, token.Error()
 	}
 
-	time.Sleep(1 * time.Second)
+	getPayload := map[string]string{
+		"brightness": "",
+	}
+	client.Publish("zigbee2mqtt/"+device+"/get", 0, false, toJSON(getPayload))
+
+	select {
+	case msg := <-messageChannel:
+		var deviceData map[string]interface{}
+		if err := json.Unmarshal(msg.Payload(), &deviceData); err != nil {
+			return 0, err
+		}
+		log.Info().Msgf("Device data: %v", deviceData)
+		if b, ok := deviceData["brightness"].(float64); ok {
+			brightness = int(b)
+		}
+	case <-time.After(5 * time.Second):
+		log.Info().Msg("Timeout waiting for brightness")
+		return 0, fmt.Errorf("timeout waiting for brightness")
+	}
+
 	client.Unsubscribe("zigbee2mqtt/" + device)
 
 	return brightness, nil
@@ -101,10 +117,12 @@ func controlBrightness(server, user, pass, device, action string) {
 
 	currentBrightness, err := getCurrentBrightness(client, device)
 	if err != nil {
-		fmt.Println("Error getting current brightness:", err)
+		log.Error().Err(err).Msg("Error getting current brightness")
 		client.Disconnect(250)
 		return
 	}
+
+	log.Info().Msgf("Current brightness: %d", currentBrightness)
 
 	switch action {
 	case "increase":

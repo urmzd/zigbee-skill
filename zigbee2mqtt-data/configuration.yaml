@@ -14,6 +14,7 @@ advanced:
   homeassistant_legacy_entity_attributes: false
   legacy_api: false
   legacy_availability_payload: false
+  reporting: true
 device_options:
   legacy: false
 external_converters:
