@@ -126,13 +126,13 @@ func controlBrightness(server, user, pass, device, action string) {
 
 	switch action {
 	case "increase":
-		newBrightness := currentBrightness + 50
+		newBrightness := currentBrightness + 12
 		if newBrightness > 255 {
 			newBrightness = 255
 		}
 		setBrightness(client, device, newBrightness)
 	case "decrease":
-		newBrightness := currentBrightness - 50
+		newBrightness := currentBrightness - 12
 		if newBrightness < 0 {
 			newBrightness = 0
 		}
