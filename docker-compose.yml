@@ -13,8 +13,8 @@ services:
       - "9001:9001"
     restart: unless-stopped
     volumes:
-      - ./mosquitto/mosquitto-data:/mosquitto/data
-      - ./mosquitto/mosquitto-logs:/mosquitto/logs
+      - ./configs/mosquitto/mosquitto-data:/mosquitto/data
+      - ./configs/mosquitto/mosquitto-logs:/mosquitto/logs
 
   zigbee2mqtt:
     depends_on: 
@@ -24,7 +24,7 @@ services:
       - 8080:8080
     image: koenkk/zigbee2mqtt
     volumes:
-      - ./zigbee2mqtt-data:/app/data
+      - ./configs/zigbee2mqtt-data:/app/data
       - /run/udev:/run/udev:ro
     devices:
       - /dev/ttyUSB0:/dev/ttyUSB0

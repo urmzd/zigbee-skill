@@ -1,0 +1,24 @@
+permit_join: true
+mqtt:
+  base_topic: zigbee2mqtt
+  server: mqtt://mqtt
+  user: root
+  password: pass
+serial:
+  port: /dev/ttyUSB0
+frontend:
+  port: 8080
+advanced:
+  log_level: debug
+  network: GENERATE
+  homeassistant_legacy_entity_attributes: false
+  legacy_api: false
+  legacy_availability_payload: false
+  reporting: true
+device_options:
+  legacy: false
+external_converters:
+  - 70552.js
+devices:
+  '0xf0d1b80000180b67':
+    friendly_name: '0xf0d1b80000180b67'

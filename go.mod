@@ -1,4 +1,4 @@
-module github.com/urmzd/sunlight-lamp
+module github.com/urmzd/sunrise-lamp
 
 go 1.19
 
