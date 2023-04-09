@@ -11,6 +11,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func NewClient(server string, user string, pass string) mqtt.Client {
+	opts := mqtt.NewClientOptions().AddBroker(server).SetUsername(user).SetPassword(pass)
+	client := mqtt.NewClient(opts)
+	token := client.Connect()
+	token.Wait()
+
+	return client
+}
+
 var (
 	setCmd = &cobra.Command{
 		Use:   "set [value]",
@@ -19,7 +28,7 @@ var (
 		Run: func(cmd *cobra.Command, args []string) {
 			value, _ := strconv.Atoi(args[0])
 			client:= NewClient(mqttServer, mqttUsername, mqttPassword)
-			controlBrightness(client, deviceFriendlyName, value)
+			SetBrightness(client, deviceFriendlyName, value)
 		},
 	}
 
@@ -28,7 +37,7 @@ var (
 		Short: "Get current brightness",
 		Run: func(cmd *cobra.Command, args []string) {
 			client := NewClient(mqttServer, mqttUsername, mqttPassword)
-			getCurrentBrightness(client, deviceFriendlyName)
+			GetCurrentBrightness(client, deviceFriendlyName)
 		},
 	}
 )
@@ -38,11 +47,12 @@ func init() {
 	rootCmd.AddCommand(getCmd)
 }
 
-func setBrightness(client mqtt.Client, device string, brightness int) {
+func SetBrightness(client mqtt.Client, device string, brightness int) {
 	scaledBrightness := scaleBrightness(brightness)
 	message := make(map[string]int)
 	message["brightness"] = scaledBrightness
 	client.Publish("zigbee2mqtt/"+device+"/set", 0, false, toJSON(message))
+	client.Disconnect(250)
 }
 
 func toJSON(obj interface{}) string {
@@ -57,24 +67,8 @@ func scaleBrightness(value int) int {
 	return int(float64(value) * (255.0 / 10.0))
 }
 
-func NewClient(server string, user string, pass string) mqtt.Client {
-	opts := mqtt.NewClientOptions().AddBroker(server).SetUsername(user).SetPassword(pass)
-	client := mqtt.NewClient(opts)
-	token := client.Connect()
-	token.Wait()
 
-	return client
-}
-
-func controlBrightness(client mqtt.Client, device string, value int) {
-	token := client.Connect()
-	token.Wait()
-	setBrightness(client, device, value)
-
-	client.Disconnect(250)
-}
-
-func getCurrentBrightness(client mqtt.Client, device string) {
+func GetCurrentBrightness(client mqtt.Client, device string) {
 	var brightness int
 	messageChannel := make(chan mqtt.Message)
 

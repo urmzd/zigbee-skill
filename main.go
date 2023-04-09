@@ -26,7 +26,7 @@ func main() {
 	rootCmd.PersistentFlags().StringVar(&mqttServer, "mqtt-server", "mqtt://localhost:1883", "MQTT server address")
 	rootCmd.PersistentFlags().StringVar(&mqttUsername, "mqtt-username", "root", "MQTT username")
 	rootCmd.PersistentFlags().StringVar(&mqttPassword, "mqtt-password", "pass", "MQTT password")
-	rootCmd.PersistentFlags().StringVar(&deviceFriendlyName, "device-friendly-name", "0xf0d1b80000180b67", "Device friendly name")
+	rootCmd.PersistentFlags().StringVar(&deviceFriendlyName, "device-friendly-name", "a19", "Device friendly name")
 
 	cobra.CheckErr(rootCmd.Execute())
 }

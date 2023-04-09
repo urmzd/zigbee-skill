@@ -1,40 +1,20 @@
-# Infrastructure: 
-
-The `cdk.json` file tells the CDK toolkit how to execute your app.
-
-## Useful commands
-
- * `cdk deploy`      deploy this stack to your default AWS account/region
- * `cdk diff`        compare deployed stack with current state
- * `cdk synth`       emits the synthesized CloudFormation template
- * `go test`         run unit tests
-
+# Infrastructure
 
 ## Overview
 DESIRED COMMANDS:
-- ON
-- OFF
-- INCREASE
-- DECREASE
-- SET SUNRISE 
-- DELETE SUNRISE
-- SET SUNSET
-- DELETE SUNSET
+- SET 
+- GET 
+- SET/DELETE SUNRISE
+- SET/DELETE SUNSET
 
-Compute:
-- Step Functions
-- Lambda
+ECS Holding MQTT Broker
+CloudWatch Events (for SUNRISE/SUNSET)
+Secrets Manager
+Lambda 
+S3
+Step Functions
+CloudFormation (via CDK)
 
-Storage: 
-- S3: Stores the configuration file.
-
-Network:
-- API Gateway: Protects the API + Static Content
-
-General:
-- Secrets Manager
-- IOT Core
-- CloudWatch Events (schedule events)
 
 ```go
 type Config struct {

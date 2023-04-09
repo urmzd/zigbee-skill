@@ -21,4 +21,6 @@ external_converters:
   - 70552.js
 devices:
   '0xf0d1b80000180b67':
-    friendly_name: '0xf0d1b80000180b67'
+    friendly_name: a19
+  '0xdd16abfff1a19bd3':
+    friendly_name: '0xdd16abfff1a19bd3'
