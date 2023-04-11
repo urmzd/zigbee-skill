@@ -7,6 +7,9 @@ import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import { Construct } from "constructs";
 import * as path from "node:path"
 import * as iam from "aws-cdk-lib/aws-iam";
+import * as events from "aws-cdk-lib/aws-events"
+import * as lambda from "aws-cdk-lib/aws-lambda"
+import { LambdaFunction } from "aws-cdk-lib/aws-events-targets";
 
 export class InfrastructureStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -79,10 +82,6 @@ export class InfrastructureStack extends cdk.Stack {
         subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
       })
     })
-
-    vpc.addInterfaceEndpoint("EcsTelemetryEndpoint", {
-      service: ec2.InterfaceVpcEndpointAwsService.ECS_TELEMETRY,
-    });
 
     vpc.addInterfaceEndpoint("CloudWatchLogsEndpoint", {
       service: ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS,
@@ -179,66 +178,68 @@ export class InfrastructureStack extends cdk.Stack {
       targets: [mqttBroker],
     });
 
-    //const coreEnv = {
-      //BUCKET: configBucket.bucketName,
-      //SERVER: `mqtt://${mqttLoadBalancer.loadBalancerDnsName}:1883`,
-      //CREDS: mqttCreds.secretArn,
-      //DEVICE: "a19",
-    //}
+    const coreEnv = {
+      BUCKET: configBucket.bucketName,
+      SERVER: `mqtt://${mqttLoadBalancer.loadBalancerDnsName}:1883`,
+      CREDS: mqttCreds.secretArn,
+      DEVICE: "a19",
+    }
 
-    //// We call this function several times as scheduled by the schedule lambda.
-    //const increaseFunction = new lambda.Function(
-      //this,
-      //"LambdaIncreaseFunction",
-      //{
-        //runtime: lambda.Runtime.GO_1_X,
-        //handler: "increase",
-        //code: lambda.Code.fromAsset("../../bin"),
-        //environment: coreEnv,
-        //vpc: vpc,
-        //vpcSubnets: {
-          //subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
-        //},
-      //}
-    //);
+    const lambdasPath = lambda.Code.fromAsset(path.resolve(process.cwd(), "../bin/x86_64"))
 
-    //// This is scheduled every day at midnight, and schedules multiple increases for sunrise and sunset.
-    //// We number the invocations to prevent redundant logic from running.
-    //const scheduleFunction = new lambda.Function(
-      //this,
-      //"LambdaScheduleFunction",
-      //{
-        //runtime: lambda.Runtime.GO_1_X,
-        //handler: "schedule",
-        //code: lambda.Code.fromAsset("../../bin"),
-        //environment: {
-          //...coreEnv,
-          //INCREASE_FUNCTION_ARN: increaseFunction.functionArn,
-        //},
-        //vpc: vpc,
-        //vpcSubnets: {
-          //subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
-        //},
-      //}
-    //);
+    // We call this function several times as scheduled by the schedule lambda.
+    const increaseFunction = new lambda.Function(
+      this,
+      "LambdaIncreaseFunction",
+      {
+        runtime: lambda.Runtime.GO_1_X,
+        handler: "increase",
+        code: lambdasPath,
+        environment: coreEnv,
+        vpc: vpc,
+        vpcSubnets: {
+          subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
+        },
+      }
+    );
 
-    //// Define EventBridge rule for midnight schedule
-    //const midnightRule = new events.Rule(this, "MidnightSchedule", {
-      //schedule: events.Schedule.rate(cdk.Duration.days(1)),
-    //});
+    // This is scheduled every day at midnight, and schedules multiple increases for sunrise and sunset.
+    // We number the invocations to prevent redundant logic from running.
+    const scheduleFunction = new lambda.Function(
+      this,
+      "LambdaScheduleFunction",
+      {
+        runtime: lambda.Runtime.GO_1_X,
+        handler: "schedule",
+        code: lambdasPath,
+        environment: {
+          ...coreEnv,
+          INCREASE_FUNCTION_ARN: increaseFunction.functionArn,
+        },
+        vpc: vpc,
+        vpcSubnets: {
+          subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
+        },
+      }
+    );
 
-    //// Add Lambda function as a target for the EventBridge rule
-    //midnightRule.addTarget(new targets.LambdaFunction(scheduleFunction));
+    // Define EventBridge rule for midnight schedule
+    const midnightRule = new events.Rule(this, "MidnightSchedule", {
+      schedule: events.Schedule.rate(cdk.Duration.days(1)),
+    });
 
-    //// Grant required permissions to Lambda functions
-    //configBucket.grantReadWrite(increaseFunction);
+    // Add Lambda function as a target for the EventBridge rule
+    midnightRule.addTarget(new LambdaFunction(scheduleFunction));
 
-    //const mqttCredentials = secretsmanager.Secret.fromSecretNameV2(
-      //this,
-      //"MQTTCredentials",
-      //"mqtt-credentials"
-    //);
+    // Grant required permissions to Lambda functions
+    configBucket.grantReadWrite(increaseFunction);
 
-    //mqttCredentials.grantRead(increaseFunction);
+    const mqttCredentials = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "MQTTCredentials",
+      "mqtt-credentials"
+    );
+
+    mqttCredentials.grantRead(increaseFunction);
   }
 }
