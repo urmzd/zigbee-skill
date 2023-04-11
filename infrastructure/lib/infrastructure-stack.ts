@@ -198,6 +198,10 @@ export class SunriseLampStack extends cdk.Stack {
         containerPort: 1883,
         hostPort: 1883,
         protocol: ecs.Protocol.TCP,
+      }, {
+        containerPort: 8080,
+        hostPort: 8080,
+        protocol: ecs.Protocol.TCP,
       });
 
     const mqttBroker = new ecs.FargateService(this, "MQTTBrokerService", {
@@ -232,8 +236,8 @@ export class SunriseLampStack extends cdk.Stack {
       port: 1883,
       targets: [mqttBroker],
       healthCheck: {
-        path: "/",
         port: "8080",
+        protocol: elbv2.Protocol.TCP
       }
     });
 
