@@ -4,11 +4,8 @@ FROM eclipse-mosquitto:latest
 # Set the working directory
 WORKDIR /app
 
-ARG MQTT_USERNAME
-ARG MQTT_PASSWORD
-
 # Copy configuration file
-COPY configs/mosquitto/config/mosquitto.conf /mosquitto/config/mosquitto.conf
+COPY config/mosquitto.conf /mosquitto/config/mosquitto.conf
 
 COPY ./entrypoint.sh /app/entrypoint.sh
 

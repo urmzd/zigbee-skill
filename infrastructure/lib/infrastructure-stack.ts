@@ -2,14 +2,11 @@ import * as cdk from "aws-cdk-lib";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
-import * as events from "aws-cdk-lib/aws-events";
-import * as targets from "aws-cdk-lib/aws-events-targets";
-import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import { Construct } from "constructs";
 import * as path from "node:path"
-import { DockerImageAsset } from "aws-cdk-lib/aws-ecr-assets";
+import * as iam from "aws-cdk-lib/aws-iam";
 
 export class InfrastructureStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -25,6 +22,74 @@ export class InfrastructureStack extends cdk.Stack {
           name: "Private",
         },
       ],
+    });
+
+    vpc.addInterfaceEndpoint("SecretsManagerEndpoint", {
+      service: ec2.InterfaceVpcEndpointAwsService.SECRETS_MANAGER,
+      privateDnsEnabled: true,
+      subnets: vpc.selectSubnets({
+        subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
+      })
+    })
+
+    vpc.addInterfaceEndpoint("ECREndpoint", {
+      service: ec2.InterfaceVpcEndpointAwsService.ECR,
+      privateDnsEnabled: true,
+      subnets: vpc.selectSubnets({
+        subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
+      })
+    })
+
+    vpc.addInterfaceEndpoint("ECSEndpoint", {
+      service: ec2.InterfaceVpcEndpointAwsService.ECS,
+      privateDnsEnabled: true,
+      subnets: vpc.selectSubnets({
+        subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
+      })
+    })
+
+    vpc.addInterfaceEndpoint("KmsEndpoint", {
+      service: ec2.InterfaceVpcEndpointAwsService.KMS,
+      privateDnsEnabled: true,
+      subnets: vpc.selectSubnets({
+        subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
+      })
+    })
+
+    vpc.addInterfaceEndpoint("SsmEndpoint", {
+      service: ec2.InterfaceVpcEndpointAwsService.SSM,
+      privateDnsEnabled: true,
+      subnets: vpc.selectSubnets({
+        subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
+      })
+    })
+
+    vpc.addInterfaceEndpoint("SsmMessageEndpoint", {
+      service: ec2.InterfaceVpcEndpointAwsService.SSM_MESSAGES,
+      privateDnsEnabled: true,
+      subnets: vpc.selectSubnets({
+        subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
+      })
+    })
+
+    vpc.addInterfaceEndpoint("EcsLogsEndpoint", {
+      service: ec2.InterfaceVpcEndpointAwsService.ECS_TELEMETRY,
+      privateDnsEnabled: true,
+      subnets: vpc.selectSubnets({
+        subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
+      })
+    })
+
+    vpc.addInterfaceEndpoint("EcsTelemetryEndpoint", {
+      service: ec2.InterfaceVpcEndpointAwsService.ECS_TELEMETRY,
+    });
+
+    vpc.addInterfaceEndpoint("CloudWatchLogsEndpoint", {
+      service: ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS,
+    });
+
+    vpc.addInterfaceEndpoint("EC2MessagesEndpoint", {
+      service: ec2.InterfaceVpcEndpointAwsService.EC2_MESSAGES,
     });
 
     // Define S3 bucket for the configuration file
@@ -44,32 +109,45 @@ export class InfrastructureStack extends cdk.Stack {
       },
     });
 
-    const taskDefinition = new ecs.FargateTaskDefinition(
-      this,
-      "MQTTBrokerTask"
+    const taskExecutionRole = new iam.Role(this, "TaskExecutionRole", {
+      assumedBy: new iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+    });
+
+    taskExecutionRole.addManagedPolicy(
+      iam.ManagedPolicy.fromAwsManagedPolicyName("service-role/AmazonECSTaskExecutionRolePolicy")
     );
 
-    const mqttPassword = mqttCreds.secretValueFromJson("password").toString()
-    const mqttUsername = mqttCreds.secretValueFromJson("username").toString()
+    taskExecutionRole.addManagedPolicy(
+      iam.ManagedPolicy.fromAwsManagedPolicyName("AmazonSSMManagedInstanceCore")
+    );
+
+    const taskDefinition = new ecs.FargateTaskDefinition(
+      this,
+      "MQTTBrokerTask",
+      {
+        executionRole: taskExecutionRole,
+      }
+    );
+
+    const imagePath = path.resolve(process.cwd(), "../configs/mosquitto")
+    console.log(imagePath)
 
     taskDefinition
       .addContainer("MQTTBrokerContainer", {
-        image: ecs.ContainerImage.fromAsset(path.resolve(process.cwd(), "../"), {
-          buildArgs: {
-            MQTT_USERNAME: mqttUsername,
-            MQTT_PASSWORD: mqttPassword,
-          }
-        }),
-        environment: {
-          MQTT_USERNAME: mqttUsername,
-          MQTT_PASSWORD: mqttPassword
+        secrets: {
+          MQTT_USERNAME: ecs.Secret.fromSecretsManager(mqttCreds, "username"),
+          MQTT_PASSWORD: ecs.Secret.fromSecretsManager(mqttCreds, "password"),
         },
+        image: ecs.ContainerImage.fromAsset(imagePath),
+        containerName: "mqtt",
         logging: new ecs.AwsLogDriver({
           streamPrefix: "mqtt-broker",
         }),
       })
       .addPortMappings({
         containerPort: 1883,
+        hostPort: 1883,
+        protocol: ecs.Protocol.TCP,
       });
 
     const mqttBroker = new ecs.FargateService(this, "MQTTBrokerService", {
