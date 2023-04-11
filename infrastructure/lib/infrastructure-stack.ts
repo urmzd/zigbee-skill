@@ -24,11 +24,32 @@ export class SunriseLampStack extends cdk.Stack {
           subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
           name: "Private",
         },
+        {
+          cidrMask: 24,
+          subnetType: ec2.SubnetType.PUBLIC,
+          name: "Public",
+        }
       ],
     });
 
+    vpc.addGatewayEndpoint("S3Endpoint", {
+      service: ec2.GatewayVpcEndpointAwsService.S3,
+      subnets: [{
+        subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
+      }]
+    })
+
     vpc.addInterfaceEndpoint("SecretsManagerEndpoint", {
       service: ec2.InterfaceVpcEndpointAwsService.SECRETS_MANAGER,
+      privateDnsEnabled: true,
+      subnets: vpc.selectSubnets({
+        subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
+        onePerAz: true
+      })
+    })
+
+    vpc.addInterfaceEndpoint("KmsEndpoint", {
+      service: ec2.InterfaceVpcEndpointAwsService.KMS,
       privateDnsEnabled: true,
       subnets: vpc.selectSubnets({
         subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
@@ -63,14 +84,6 @@ export class SunriseLampStack extends cdk.Stack {
       })
     })
 
-    vpc.addInterfaceEndpoint("KmsEndpoint", {
-      service: ec2.InterfaceVpcEndpointAwsService.KMS,
-      privateDnsEnabled: true,
-      subnets: vpc.selectSubnets({
-        subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
-        onePerAz: true
-      })
-    })
 
     vpc.addInterfaceEndpoint("SsmEndpoint", {
       service: ec2.InterfaceVpcEndpointAwsService.SSM,
@@ -117,6 +130,7 @@ export class SunriseLampStack extends cdk.Stack {
       })
     });
 
+
     // Define S3 bucket for the configuration file
     const configBucket = new s3.Bucket(this, "ConfigBucket");
 
@@ -134,20 +148,20 @@ export class SunriseLampStack extends cdk.Stack {
       },
     });
 
-    const taskExecutionRole = new iam.Role(this, "TaskExecutionRole", {
+    const taskRole = new iam.Role(this, "TaskExecutionRole", {
       assumedBy: new iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
     });
 
-    taskExecutionRole.addManagedPolicy(
+    taskRole.addManagedPolicy(
       iam.ManagedPolicy.fromAwsManagedPolicyName("service-role/AmazonECSTaskExecutionRolePolicy")
     );
 
-    taskExecutionRole.addManagedPolicy(
+    taskRole.addManagedPolicy(
       iam.ManagedPolicy.fromAwsManagedPolicyName("AmazonSSMManagedInstanceCore")
     );
 
-    // TODO: update wildcard afterwards.
-    taskExecutionRole.addToPolicy(
+    // TODO: remove wildcard afterwards.
+    taskRole.addToPolicy(
       new iam.PolicyStatement({
         actions: [
           'ecr:GetAuthorizationToken',
@@ -167,7 +181,7 @@ export class SunriseLampStack extends cdk.Stack {
       this,
       "MQTTBrokerTask",
       {
-        executionRole: taskExecutionRole,
+        taskRole: taskRole,
         memoryLimitMiB: 512,
         cpu: 256,
       }
@@ -230,7 +244,7 @@ export class SunriseLampStack extends cdk.Stack {
       DEVICE: "a19",
     }
 
-    const lambdasPath = lambda.Code.fromAsset(path.resolve(process.cwd(), "../bin/x86_64"))
+    const lambdasPath = lambda.Code.fromAsset(path.resolve(process.cwd(), "../bin"))
 
     // We call this function several times as scheduled by the schedule lambda.
     const increaseFunction = new lambda.Function(
