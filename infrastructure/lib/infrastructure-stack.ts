@@ -9,6 +9,7 @@ import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import { Construct } from "constructs";
 import * as path from "node:path"
+import { DockerImageAsset } from "aws-cdk-lib/aws-ecr-assets";
 
 export class InfrastructureStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -53,7 +54,12 @@ export class InfrastructureStack extends cdk.Stack {
 
     taskDefinition
       .addContainer("MQTTBrokerContainer", {
-        image: ecs.ContainerImage.fromAsset(path.resolve(process.cwd(), "../")),
+        image: ecs.ContainerImage.fromAsset(path.resolve(process.cwd(), "../"), {
+          buildArgs: {
+            MQTT_USERNAME: mqttUsername,
+            MQTT_PASSWORD: mqttPassword,
+          }
+        }),
         environment: {
           MQTT_USERNAME: mqttUsername,
           MQTT_PASSWORD: mqttPassword
