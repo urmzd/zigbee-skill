@@ -126,6 +126,8 @@ export class InfrastructureStack extends cdk.Stack {
       "MQTTBrokerTask",
       {
         executionRole: taskExecutionRole,
+        memoryLimitMiB: 512,
+        cpu: 256,
       }
     );
 
