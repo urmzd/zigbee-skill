@@ -2,12 +2,14 @@
 FROM eclipse-mosquitto:latest
 
 # Set the working directory
-WORKDIR /mosquitto
+WORKDIR /app
 
 # Copy configuration file
 COPY configs/mosquitto/config/mosquitto.conf /mosquitto/config/mosquitto.conf
 
-COPY ./entrypoint.sh ./entrypoint.sh
+COPY ./entrypoint.sh /app/entrypoint.sh
 
 # Set the entrypoint
-ENTRYPOINT ["./entrypoint.sh"]
+ENTRYPOINT ["/app/entrypoint.sh"]
+
+CMD ["mosquitto", "-c", "/mosquitto/config/mosquitto.conf"]

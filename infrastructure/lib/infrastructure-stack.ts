@@ -6,7 +6,9 @@ import * as events from "aws-cdk-lib/aws-events";
 import * as targets from "aws-cdk-lib/aws-events-targets";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
+import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import { Construct } from "constructs";
+import * as path from "node:path"
 
 export class InfrastructureStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -17,12 +19,9 @@ export class InfrastructureStack extends cdk.Stack {
       maxAzs: 2,
       subnetConfiguration: [
         {
+          cidrMask: 24,
           subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
           name: "Private",
-        },
-        {
-          subnetType: ec2.SubnetType.PUBLIC,
-          name: "Public",
         },
       ],
     });
@@ -49,12 +48,15 @@ export class InfrastructureStack extends cdk.Stack {
       "MQTTBrokerTask"
     );
 
+    const mqttPassword = mqttCreds.secretValueFromJson("password").toString()
+    const mqttUsername = mqttCreds.secretValueFromJson("username").toString()
+
     taskDefinition
       .addContainer("MQTTBrokerContainer", {
-        image: ecs.ContainerImage.fromAsset("../../"),
+        image: ecs.ContainerImage.fromAsset(path.resolve(process.cwd(), "../")),
         environment: {
-          MQTT_USERNAME: mqttCreds.secretValueFromJson("username").toString(),
-          MQTT_PASSWORD: mqttCreds.secretValueFromJson("password").toString(),
+          MQTT_USERNAME: mqttUsername,
+          MQTT_PASSWORD: mqttPassword
         },
         logging: new ecs.AwsLogDriver({
           streamPrefix: "mqtt-broker",
@@ -64,7 +66,7 @@ export class InfrastructureStack extends cdk.Stack {
         containerPort: 1883,
       });
 
-    new ecs.FargateService(this, "MQTTBrokerService", {
+    const mqttBroker = new ecs.FargateService(this, "MQTTBrokerService", {
       cluster,
       taskDefinition,
       assignPublicIp: false,
@@ -73,60 +75,84 @@ export class InfrastructureStack extends cdk.Stack {
       },
     });
 
-    // We call this function several times as scheduled by the schedule lambda.
-    const increaseFunction = new lambda.Function(
-      this,
-      "LambdaIncreaseFunction",
-      {
-        runtime: lambda.Runtime.GO_1_X,
-        handler: "main",
-        code: lambda.Code.fromAsset("../../cmd/increase"),
-        environment: {
-          CONFIG_BUCKET_NAME: configBucket.bucketName,
-        },
-        vpc: vpc,
-        vpcSubnets: {
-          subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
-        },
-      }
-    );
-
-    // This is scheduled every day at midnight, and schedules multiple increases for sunrise and sunset.
-    // We number the invocations to prevent redundant logic from running.
-    const scheduleFunction = new lambda.Function(
-      this,
-      "LambdaScheduleFunction",
-      {
-        runtime: lambda.Runtime.GO_1_X,
-        handler: "main",
-        code: lambda.Code.fromAsset("../../cmd/schedule"),
-        environment: {
-          INCREASE_FUNCTION_ARN: increaseFunction.functionArn,
-        },
-        vpc: vpc,
-        vpcSubnets: {
-          subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
-        },
-      }
-    );
-
-    // Define EventBridge rule for midnight schedule
-    const midnightRule = new events.Rule(this, "MidnightSchedule", {
-      schedule: events.Schedule.rate(cdk.Duration.days(1)),
+    // Create an Application Load Balancer
+    const mqttLoadBalancer = new elbv2.NetworkLoadBalancer(this, "MQTTLoadBalancer", {
+      vpc,
+      internetFacing: false,
     });
 
-    // Add Lambda function as a target for the EventBridge rule
-    midnightRule.addTarget(new targets.LambdaFunction(scheduleFunction));
+    // Add a listener to the Application Load Balancer
+    const mqttListener = mqttLoadBalancer.addListener("MQTTListener", {
+      port: 1883,
+      protocol: elbv2.Protocol.TCP,
+    });
 
-    // Grant required permissions to Lambda functions
-    configBucket.grantReadWrite(increaseFunction);
+    // Add the MQTT broker as a target for the listener
+    mqttListener.addTargets("MQTTBrokerTarget", {
+      port: 1883,
+      targets: [mqttBroker],
+    });
 
-    const mqttCredentials = secretsmanager.Secret.fromSecretNameV2(
-      this,
-      "MQTTCredentials",
-      "mqtt-credentials"
-    );
+    //const coreEnv = {
+      //BUCKET: configBucket.bucketName,
+      //SERVER: `mqtt://${mqttLoadBalancer.loadBalancerDnsName}:1883`,
+      //CREDS: mqttCreds.secretArn,
+      //DEVICE: "a19",
+    //}
 
-    mqttCredentials.grantRead(increaseFunction);
+    //// We call this function several times as scheduled by the schedule lambda.
+    //const increaseFunction = new lambda.Function(
+      //this,
+      //"LambdaIncreaseFunction",
+      //{
+        //runtime: lambda.Runtime.GO_1_X,
+        //handler: "increase",
+        //code: lambda.Code.fromAsset("../../bin"),
+        //environment: coreEnv,
+        //vpc: vpc,
+        //vpcSubnets: {
+          //subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
+        //},
+      //}
+    //);
+
+    //// This is scheduled every day at midnight, and schedules multiple increases for sunrise and sunset.
+    //// We number the invocations to prevent redundant logic from running.
+    //const scheduleFunction = new lambda.Function(
+      //this,
+      //"LambdaScheduleFunction",
+      //{
+        //runtime: lambda.Runtime.GO_1_X,
+        //handler: "schedule",
+        //code: lambda.Code.fromAsset("../../bin"),
+        //environment: {
+          //...coreEnv,
+          //INCREASE_FUNCTION_ARN: increaseFunction.functionArn,
+        //},
+        //vpc: vpc,
+        //vpcSubnets: {
+          //subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
+        //},
+      //}
+    //);
+
+    //// Define EventBridge rule for midnight schedule
+    //const midnightRule = new events.Rule(this, "MidnightSchedule", {
+      //schedule: events.Schedule.rate(cdk.Duration.days(1)),
+    //});
+
+    //// Add Lambda function as a target for the EventBridge rule
+    //midnightRule.addTarget(new targets.LambdaFunction(scheduleFunction));
+
+    //// Grant required permissions to Lambda functions
+    //configBucket.grantReadWrite(increaseFunction);
+
+    //const mqttCredentials = secretsmanager.Secret.fromSecretNameV2(
+      //this,
+      //"MQTTCredentials",
+      //"mqtt-credentials"
+    //);
+
+    //mqttCredentials.grantRead(increaseFunction);
   }
 }
