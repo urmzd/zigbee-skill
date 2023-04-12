@@ -8,7 +8,7 @@ import * as path from "node:path";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
-import * as s3 from "aws-cdk-lib/aws-s3"
+import * as s3 from "aws-cdk-lib/aws-s3";
 
 export class SunriseLampStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -242,7 +242,7 @@ export class SunriseLampStack extends cdk.Stack {
       {
         vpc,
         internetFacing: false,
-        securityGroup: mqttLoadBalancerSg
+        securityGroup: mqttLoadBalancerSg,
       }
     );
 
@@ -268,7 +268,7 @@ export class SunriseLampStack extends cdk.Stack {
 
     const configBucket = new s3.Bucket(this, "ConfigBucket", {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
-    })
+    });
 
     const coreEnv = {
       CONFIG_BUCKET: configBucket.bucketName,
@@ -280,8 +280,15 @@ export class SunriseLampStack extends cdk.Stack {
       path.resolve(process.cwd(), "../bin")
     );
 
+    const controlSg = new ec2.SecurityGroup(this, "ControlSecurityGroup", {
+      vpc,
+      allowAllOutbound: true,
+    });
+
+    mqttLoadBalancerSg.connections.allowTo(controlSg, ec2.Port.tcp(1883));
+
     // We call this function several times as scheduled by the schedule lambda.
-    const controlLambda = new lambda.Function(this, "ControlLambda", {
+    const controlLambda = new lambda.Function(this, "control", {
       runtime: lambda.Runtime.GO_1_X,
       handler: "control",
       code: lambdasPath,
@@ -291,7 +298,17 @@ export class SunriseLampStack extends cdk.Stack {
         subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
       },
       timeout: cdk.Duration.seconds(15),
+      securityGroups: [controlSg]
     });
+
+
+    controlLambda.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["secretsmanager:GetSecretValue", "kms:Decrypt"],
+        resources: ["*"],
+      })
+    );
 
     const mqttCredentials = secretsmanager.Secret.fromSecretNameV2(
       this,
