@@ -7,12 +7,11 @@ import { Construct } from "constructs";
 import * as path from "node:path";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
-import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as s3 from "aws-cdk-lib/aws-s3";
 
-const MQTT_PORT = 1883
-const WS_PORT = 9001
-const HC_PORT = 8081
+const MQTT_PORT = 1883;
+const WS_PORT = 9001;
+const HC_PORT = 8081;
 
 export class SunriseLampStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -20,9 +19,10 @@ export class SunriseLampStack extends cdk.Stack {
 
     const vpc = new ec2.Vpc(this, "VPC", {
       maxAzs: 2,
+      ipAddresses: ec2.IpAddresses.cidr("10.0.0.0/24"),
       subnetConfiguration: [
         {
-          cidrMask: 24,
+          cidrMask: 26,
           subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
           name: "Private",
         },
@@ -215,9 +215,6 @@ export class SunriseLampStack extends cdk.Stack {
       }
     );
 
-    mqttBrokerSg.connections.allowFromAnyIpv4(ec2.Port.tcp(WS_PORT));
-    mqttBrokerSg.connections.allowFromAnyIpv4(ec2.Port.tcp(HC_PORT));
-
     const mqttBroker = new ecs.FargateService(this, "MQTTBrokerService", {
       cluster,
       taskDefinition,
@@ -238,10 +235,6 @@ export class SunriseLampStack extends cdk.Stack {
       }
     );
 
-    mqttLoadBalancerSg.connections.allowFromAnyIpv4(ec2.Port.tcp(WS_PORT))
-    mqttLoadBalancerSg.connections.allowTo(mqttBrokerSg, ec2.Port.tcp(WS_PORT));
-    mqttLoadBalancerSg.connections.allowTo(mqttBrokerSg, ec2.Port.tcp(HC_PORT));
-
     // Create an Application Load Balancer
     const mqttLoadBalancer = new elbv2.ApplicationLoadBalancer(
       this,
@@ -257,6 +250,7 @@ export class SunriseLampStack extends cdk.Stack {
     const mqttListener = mqttLoadBalancer.addListener("MQTTListener", {
       port: WS_PORT,
       protocol: elbv2.ApplicationProtocol.HTTP,
+      open: true
     });
 
     // Add the MQTT broker as a target for the listener
@@ -291,7 +285,24 @@ export class SunriseLampStack extends cdk.Stack {
       allowAllOutbound: true,
     });
 
-    mqttLoadBalancerSg.connections.allowFrom(controlSg, ec2.Port.tcp(WS_PORT));
+    const controlLambdaExecutionRole = new iam.Role(
+      this,
+      "ControlLambdaExecutionRole",
+      {
+        assumedBy: new iam.ServicePrincipal("lambda.amazonaws.com"),
+        managedPolicies: [
+          iam.ManagedPolicy.fromAwsManagedPolicyName(
+            "service-role/AWSLambdaVPCAccessExecutionRole"
+          ),
+        ],
+      }
+    );
+
+    const mqttCredentials = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "MQTTCredentials",
+      "mqtt-credentials"
+    );
 
     // We call this function several times as scheduled by the schedule lambda.
     const controlLambda = new lambda.Function(this, "Control", {
@@ -303,10 +314,10 @@ export class SunriseLampStack extends cdk.Stack {
       vpcSubnets: {
         subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
       },
+      role: controlLambdaExecutionRole,
       timeout: cdk.Duration.seconds(15),
-      securityGroups: [controlSg]
+      securityGroups: [controlSg],
     });
-
 
     controlLambda.addToRolePolicy(
       new iam.PolicyStatement({
@@ -316,15 +327,6 @@ export class SunriseLampStack extends cdk.Stack {
       })
     );
 
-    const mqttCredentials = secretsmanager.Secret.fromSecretNameV2(
-      this,
-      "MQTTCredentials",
-      "mqtt-credentials"
-    );
-
-    mqttCredentials.grantRead(controlLambda);
-
-    // Create the Lambda function
     const createMappingLambda = new lambda.Function(this, "CreateMapping", {
       runtime: lambda.Runtime.GO_1_X,
       handler: "create_mapping",
@@ -335,7 +337,17 @@ export class SunriseLampStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(15),
     });
 
+    mqttCredentials.grantRead(controlLambda);
+
     configBucket.grantReadWrite(createMappingLambda);
     configBucket.grantRead(controlLambda);
+
+    mqttLoadBalancerSg.connections.allowFromAnyIpv4(ec2.Port.tcp(WS_PORT));
+    mqttLoadBalancerSg.connections.allowFromAnyIpv4(ec2.Port.tcp(HC_PORT));
+
+    controlSg.connections.allowFrom(mqttLoadBalancerSg, ec2.Port.tcp(WS_PORT));
+
+    mqttBrokerSg.connections.allowFromAnyIpv4(ec2.Port.tcp(WS_PORT));
+    mqttBrokerSg.connections.allowFromAnyIpv4(ec2.Port.tcp(HC_PORT));
   }
 }

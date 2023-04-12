@@ -4,5 +4,5 @@ import * as cdk from "aws-cdk-lib";
 import { SunriseLampStack } from "../lib/infrastructure-stack";
 
 const app = new cdk.App();
-const suffix=""
-new SunriseLampStack(app, `SunriseLamp${suffix}`)
+const suffix = process.env["SUFFIX"] || "";
+new SunriseLampStack(app, `SunriseLamp${suffix}`);
