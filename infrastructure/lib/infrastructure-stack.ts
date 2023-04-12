@@ -176,8 +176,8 @@ export class SunriseLampStack extends cdk.Stack {
 
     taskDefinition
       .addContainer("MQTTBrokerContainer", {
-        cpu: 256,
-        memoryLimitMiB: 512,
+        cpu: 512,
+        memoryLimitMiB: 1024,
         secrets: {
           MQTT_USER: ecs.Secret.fromSecretsManager(mqttCreds, "user"),
           MQTT_PASSWORD: ecs.Secret.fromSecretsManager(mqttCreds, "password"),
@@ -201,6 +201,18 @@ export class SunriseLampStack extends cdk.Stack {
         }
       );
 
+    const mqttBrokerSg = new ec2.SecurityGroup(
+      this,
+      "MQTTBrokerSecurityGroup",
+      {
+        vpc,
+        allowAllOutbound: true,
+      }
+    );
+
+    mqttBrokerSg.connections.allowFromAnyIpv4(ec2.Port.tcp(1883));
+    mqttBrokerSg.connections.allowFromAnyIpv4(ec2.Port.tcp(8081));
+
     const mqttBroker = new ecs.FargateService(this, "MQTTBrokerService", {
       cluster,
       taskDefinition,
@@ -209,7 +221,18 @@ export class SunriseLampStack extends cdk.Stack {
       vpcSubnets: {
         subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
       },
+      securityGroups: [mqttBrokerSg],
     });
+
+    // required so that health check can pass.
+    const mqttLoadBalancerSg = new ec2.SecurityGroup(
+      this,
+      "MQTTLoadBalancerSecurityGroup",
+      {
+        vpc,
+        allowAllOutbound: true,
+      }
+    );
 
     // Create an Application Load Balancer
     const mqttLoadBalancer = new elbv2.ApplicationLoadBalancer(
@@ -218,8 +241,11 @@ export class SunriseLampStack extends cdk.Stack {
       {
         vpc,
         internetFacing: false,
+        securityGroup: mqttLoadBalancerSg
       }
     );
+
+    mqttLoadBalancer.connections.allowFromAnyIpv4(ec2.Port.tcp(1883));
 
     // Add a listener to the Application Load Balancer
     const mqttListener = mqttLoadBalancer.addListener("MQTTListener", {
@@ -266,6 +292,7 @@ export class SunriseLampStack extends cdk.Stack {
       vpcSubnets: {
         subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
       },
+      timeout: cdk.Duration.seconds(15),
     });
 
     const mqttCredentials = secretsmanager.Secret.fromSecretNameV2(
@@ -284,6 +311,7 @@ export class SunriseLampStack extends cdk.Stack {
       environment: {
         DEVICE_MAPPING_TABLE: coreEnv.DEVICE_MAPPING_TABLE,
       },
+      timeout: cdk.Duration.seconds(15),
     });
 
     // Grant write permissions to the Lambda function

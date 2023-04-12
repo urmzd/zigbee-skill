@@ -21,7 +21,7 @@ services:
     build:
       context: "configs/mosquitto"
     ports:
-      - 8001:8001
+      - 8081:8081
       - 1883:1883
     environment:
       MQTT_USER: ${USER}

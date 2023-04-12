@@ -10,6 +10,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 type CreateMappingEvent struct {
@@ -42,5 +44,7 @@ func handler(ctx context.Context, event CreateMappingEvent) error {
 }
 
 func main() {
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 	lambda.Start(handler)
 }
