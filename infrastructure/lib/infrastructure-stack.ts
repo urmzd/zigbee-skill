@@ -10,6 +10,7 @@ import * as iam from "aws-cdk-lib/aws-iam";
 import * as events from "aws-cdk-lib/aws-events";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import { LambdaFunction } from "aws-cdk-lib/aws-events-targets";
+import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 
 export class SunriseLampStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -27,9 +28,9 @@ export class SunriseLampStack extends cdk.Stack {
           cidrMask: 24,
           subnetType: ec2.SubnetType.PUBLIC,
           name: "Public",
-        }
-       ],
-     });
+        },
+      ],
+    });
 
     vpc.addGatewayEndpoint("S3Endpoint", {
       service: ec2.GatewayVpcEndpointAwsService.S3,
@@ -194,15 +195,18 @@ export class SunriseLampStack extends cdk.Stack {
           streamPrefix: "mqtt-broker",
         }),
       })
-      .addPortMappings({
-        containerPort: 1883,
-        hostPort: 1883,
-        protocol: ecs.Protocol.TCP,
-      }, {
-        containerPort: 8080,
-        hostPort: 8080,
-        protocol: ecs.Protocol.TCP,
-      });
+      .addPortMappings(
+        {
+          containerPort: 1883,
+          hostPort: 1883,
+          protocol: ecs.Protocol.TCP,
+        },
+        {
+          containerPort: 8080,
+          hostPort: 8080,
+          protocol: ecs.Protocol.TCP,
+        }
+      );
 
     const mqttBroker = new ecs.FargateService(this, "MQTTBrokerService", {
       cluster,
@@ -230,22 +234,27 @@ export class SunriseLampStack extends cdk.Stack {
       protocol: elbv2.Protocol.TCP,
     });
 
-
     // Add the MQTT broker as a target for the listener
     mqttListener.addTargets("MQTTBrokerTarget", {
       port: 1883,
       targets: [mqttBroker],
       healthCheck: {
         port: "8080",
-        protocol: elbv2.Protocol.TCP
-      }
+        protocol: elbv2.Protocol.TCP,
+      },
+    });
+
+    // Create a DynamoDB table
+    const deviceMappingTable = new dynamodb.Table(this, "DeviceMappingTable", {
+      partitionKey: { name: "Name", type: dynamodb.AttributeType.STRING },
+      sortKey: { name: "DeviceName", type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
     });
 
     const coreEnv = {
       BUCKET: configBucket.bucketName,
       SERVER: `mqtt://${mqttLoadBalancer.loadBalancerDnsName}:1883`,
       CREDS: mqttCreds.secretArn,
-      DEVICE: "a19",
     };
 
     const lambdasPath = lambda.Code.fromAsset(
@@ -253,51 +262,19 @@ export class SunriseLampStack extends cdk.Stack {
     );
 
     // We call this function several times as scheduled by the schedule lambda.
-    const increaseFunction = new lambda.Function(
-      this,
-      "LambdaIncreaseFunction",
-      {
-        runtime: lambda.Runtime.GO_1_X,
-        handler: "increase",
-        code: lambdasPath,
-        environment: coreEnv,
-        vpc: vpc,
-        vpcSubnets: {
-          subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
-        },
-      }
-    );
-
-    // This is scheduled every day at midnight, and schedules multiple increases for sunrise and sunset.
-    // We number the invocations to prevent redundant logic from running.
-    const scheduleFunction = new lambda.Function(
-      this,
-      "LambdaScheduleFunction",
-      {
-        runtime: lambda.Runtime.GO_1_X,
-        handler: "schedule",
-        code: lambdasPath,
-        environment: {
-          ...coreEnv,
-          INCREASE_FUNCTION_ARN: increaseFunction.functionArn,
-        },
-        vpc: vpc,
-        vpcSubnets: {
-          subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
-        },
-      }
-    );
-
-    // Define EventBridge rule for midnight schedule
-    const midnightRule = new events.Rule(this, "MidnightSchedule", {
-      schedule: events.Schedule.rate(cdk.Duration.days(1)),
+    const controlFunction = new lambda.Function(this, "ControlLambda", {
+      runtime: lambda.Runtime.GO_1_X,
+      handler: "control",
+      code: lambdasPath,
+      environment: coreEnv,
+      vpc: vpc,
+      vpcSubnets: {
+        subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
+      },
     });
 
-    // Add Lambda function as a target for the EventBridge rule
-    midnightRule.addTarget(new LambdaFunction(scheduleFunction));
-
     // Grant required permissions to Lambda functions
-    configBucket.grantReadWrite(increaseFunction);
+    configBucket.grantReadWrite(controlFunction);
 
     const mqttCredentials = secretsmanager.Secret.fromSecretNameV2(
       this,
@@ -305,6 +282,29 @@ export class SunriseLampStack extends cdk.Stack {
       "mqtt-credentials"
     );
 
-    mqttCredentials.grantRead(increaseFunction);
+    mqttCredentials.grantRead(controlFunction);
+
+    // Create the Lambda function
+    const createMappingLambda = new lambda.Function(
+      this,
+      "CreateMapping",
+      {
+        runtime: lambda.Runtime.GO_1_X,
+        handler: "create_mapping", 
+        code: lambda.Code.fromAsset("../bin"),
+        environment: {
+          DEVICE_MAPPING_TABLE: deviceMappingTable.tableName,
+        },
+      }
+    );
+
+    // Grant write permissions to the Lambda function
+    const writeTablePolicy = new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ["dynamodb:PutItem"],
+      resources: [deviceMappingTable.tableArn],
+    });
+
+    createMappingLambda.addToRolePolicy(writeTablePolicy);
   }
 }
