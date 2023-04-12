@@ -8,6 +8,7 @@ import * as path from "node:path";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
+import * as s3 from "aws-cdk-lib/aws-s3"
 
 export class SunriseLampStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -265,15 +266,12 @@ export class SunriseLampStack extends cdk.Stack {
       },
     });
 
-    // Create a DynamoDB table
-    const deviceMappingTable = new dynamodb.Table(this, "DeviceMappingTable", {
-      partitionKey: { name: "Name", type: dynamodb.AttributeType.STRING },
-      sortKey: { name: "DeviceName", type: dynamodb.AttributeType.STRING },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-    });
+    const configBucket = new s3.Bucket(this, "ConfigBucket", {
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    })
 
     const coreEnv = {
-      DEVICE_MAPPING_TABLE: deviceMappingTable.tableName,
+      CONFIG_BUCKET: configBucket.bucketName,
       SERVER: `mqtt://${mqttLoadBalancer.loadBalancerDnsName}:1883`,
       CREDS: mqttCreds.secretArn,
     };
@@ -309,26 +307,12 @@ export class SunriseLampStack extends cdk.Stack {
       handler: "create_mapping",
       code: lambda.Code.fromAsset("../bin"),
       environment: {
-        DEVICE_MAPPING_TABLE: coreEnv.DEVICE_MAPPING_TABLE,
+        CONFIG_BUCKET: coreEnv.CONFIG_BUCKET,
       },
       timeout: cdk.Duration.seconds(15),
     });
 
-    // Grant write permissions to the Lambda function
-    const writeTablePolicy = new iam.PolicyStatement({
-      effect: iam.Effect.ALLOW,
-      actions: ["dynamodb:PutItem"],
-      resources: [deviceMappingTable.tableArn],
-    });
-
-    createMappingLambda.addToRolePolicy(writeTablePolicy);
-
-    const readTablePolicy = new iam.PolicyStatement({
-      effect: iam.Effect.ALLOW,
-      actions: ["dynamodb:GetItem"],
-      resources: [deviceMappingTable.tableArn],
-    });
-
-    controlLambda.addToRolePolicy(readTablePolicy);
+    configBucket.grantReadWrite(createMappingLambda);
+    configBucket.grantRead(controlLambda);
   }
 }

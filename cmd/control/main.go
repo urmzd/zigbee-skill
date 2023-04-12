@@ -6,9 +6,7 @@ import (
 
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	pkg "github.com/urmzd/sunrise-lamp/pkg"
@@ -19,14 +17,10 @@ type ControlEvent struct {
 	Level int    `json:"level"`
 }
 
-type DeviceMapping struct {
-	Name       string `json:"Name"`
-	DeviceName string `json:"DeviceName"`
-}
-
 func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	log.Info().Msg("Starting Lambda function")
 	lambda.Start(handler)
 }
 
@@ -37,35 +31,16 @@ func getDeviceName(ctx context.Context, name string) (string, error) {
 		return "", err
 	}
 
-	dbClient := dynamodb.NewFromConfig(cfg)
-	tableName := os.Getenv("DEVICE_MAPPING_TABLE")
+	s3Client := s3.NewFromConfig(cfg)
+	bucket := os.Getenv("CONFIG_BUCKET")
 
-	result, err := dbClient.GetItem(ctx, &dynamodb.GetItemInput{
-		TableName: &tableName,
-		Key: map[string]types.AttributeValue{
-			"Name": &types.AttributeValueMemberS{
-				Value: name,
-			},
-		},
-	})
-
+	deviceMapping, err := pkg.LoadDeviceMapping(s3Client, ctx, bucket, name)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to get item from DynamoDB")
+		log.Error().Err(err).Msg("Failed to load device mapping")
 		return "", err
 	}
 
-	if result.Item == nil {
-		log.Error().Msg("No item found for name")
-		return "", err
-	}
-
-	var deviceMapping DeviceMapping
-	err = attributevalue.UnmarshalMap(result.Item, &deviceMapping)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to unmarshal item")
-		return "", err
-	}
-
+	log.Info().Str("DeviceName", deviceMapping.DeviceName).Msg("Device name retrieved")
 	return deviceMapping.DeviceName, nil
 }
 
@@ -81,6 +56,8 @@ func handler(ctx context.Context, event ControlEvent) error {
 	pkg.MqttUser = os.Getenv("USER")
 	pkg.MqttPassword = os.Getenv("PASSWORD")
 	pkg.DeviceFriendlyName = deviceName
+
+	log.Info().Str("MqttServer", pkg.MqttServer).Str("MqttUser", pkg.MqttUser).Str("DeviceFriendlyName", pkg.DeviceFriendlyName).Msg("Environment variables set")
 
 	client := pkg.NewClient(pkg.MqttServer, pkg.MqttUser, pkg.MqttPassword)
 	currentBrightness := pkg.GetCurrentBrightness(client, pkg.DeviceFriendlyName)

@@ -2,16 +2,21 @@ package pkg
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
-	"io"
 	"errors"
+	"io"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
-	"context"
 )
 
-func LoadConfig(client *s3.Client, ctx context.Context, bucket, key string) (*Config, error) {
+type DeviceMapping struct {
+	Name       string `json:"Name"`
+	DeviceName string `json:"DeviceName"`
+}
+
+func LoadDeviceMapping(client *s3.Client, ctx context.Context, bucket, key string) (*DeviceMapping, error) {
 	input := &s3.GetObjectInput{
 		Bucket: &bucket,
 		Key:    &key,
@@ -20,13 +25,8 @@ func LoadConfig(client *s3.Client, ctx context.Context, bucket, key string) (*Co
 	resp, err := client.GetObject(ctx, input)
 	if err != nil {
 		var notFound *types.NoSuchKey
-		if errors.As(err, notFound) {
-			config := DefaultConfig();
-			err := UpdateConfig(client, ctx, bucket, key, config)
-			if err != nil {
-				return nil, err
-			}
-			return config, nil
+		if errors.As(err, &notFound) {
+			return nil, err
 		}
 		return nil, err
 	}
@@ -38,41 +38,17 @@ func LoadConfig(client *s3.Client, ctx context.Context, bucket, key string) (*Co
 		return nil, err
 	}
 
-	var config Config
-	err = json.Unmarshal(buf.Bytes(), &config)
+	var deviceMapping DeviceMapping
+	err = json.Unmarshal(buf.Bytes(), &deviceMapping)
 	if err != nil {
 		return nil, err
 	}
 
-	return &config, nil
+	return &deviceMapping, nil
 }
 
-func DefaultConfig() *Config {
-	sunriseConfig := &BrightnessConfig {
-			TargetBrightness: 10,
-			Set: true,
-		}
-
-	sunsetConfig := &BrightnessConfig{
-		TargetBrightness: 10,
-		Set: true,
-	}
-
-	locationConfig := &LocationConfig{
-		// i.e., Halifax Nova Scotia
-		Lat: 44.6476,
-		Long: -63.5728,
-	}
-
-	return &Config{
-		Sunrise: *sunriseConfig,
-		Sunset: *sunsetConfig,
-		Location: *locationConfig,
-	}
-}
-
-func UpdateConfig(client *s3.Client, ctx context.Context, bucket, key string, config *Config) error {
-	configBytes, err := json.Marshal(config)
+func UpdateDeviceMapping(client *s3.Client, ctx context.Context, bucket, key string, deviceMapping *DeviceMapping) error {
+	deviceMappingBytes, err := json.Marshal(deviceMapping)
 	if err != nil {
 		return err
 	}
@@ -80,7 +56,7 @@ func UpdateConfig(client *s3.Client, ctx context.Context, bucket, key string, co
 	input := &s3.PutObjectInput{
 		Bucket: &bucket,
 		Key:    &key,
-		Body:   bytes.NewReader(configBytes),
+		Body:   bytes.NewReader(deviceMappingBytes),
 	}
 
 	_, err = client.PutObject(ctx, input)

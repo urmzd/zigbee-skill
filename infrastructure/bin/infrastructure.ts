@@ -4,5 +4,5 @@ import * as cdk from "aws-cdk-lib";
 import { SunriseLampStack } from "../lib/infrastructure-stack";
 
 const app = new cdk.App();
-// TODO: remove when load balancer fixed
-new SunriseLampStack(app, `SunriseLamp-${Date.now()}`, {});
+const suffix="-1681280422669"
+new SunriseLampStack(app, `SunriseLamp${suffix}`)
