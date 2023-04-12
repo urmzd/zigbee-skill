@@ -30,13 +30,13 @@ clean:
 .PHONY: test-create-mapping
 test-create-mapping: build
 	@cd infrastructure && cdk synth --no-staging
-	@sam local invoke CreateMapping -t $(TEMPLATE) -e assets/events/create_mapping_event.json
+	@sam local invoke CreateMapping -t $(TEMPLATE) -e assets/events/create_mapping_event.json --env-vars assets/envs/create_mapping.json
 
 .PHONY: test-control
 test-control: build
 	@cd infrastructure && cdk synth --no-staging
-	@sam local invoke ControlLambda -t $(TEMPLATE) -e assets/events/control_min_event.json
-	@sam local invoke ControlLambda -t $(TEMPLATE) -e assets/events/control_max_event.json
+	@sam local invoke ControlLambda -t $(TEMPLATE) -e assets/events/control_min_event.json --env-vars assets/envs/control.json
+	@sam local invoke ControlLambda -t $(TEMPLATE) -e assets/events/control_max_event.json --env-vars assets/envs/control.json
 
 # Deploy the infrastructure
 .PHONY: deploy
