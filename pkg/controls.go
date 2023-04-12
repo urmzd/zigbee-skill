@@ -9,8 +9,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-
-func SetBrightness(client mqtt.Client, device string, brightness int) {
+func SetBrightness(client mqtt.Client, device string, brightness int) error {
 	scaledBrightness := scaleBrightness(brightness)
 	message := make(map[string]int)
 	message["brightness"] = scaledBrightness
@@ -18,11 +17,12 @@ func SetBrightness(client mqtt.Client, device string, brightness int) {
 	token.Wait()
 	if token.Error() != nil {
 		log.Error().Msgf("Error publishing to topic: %v", token.Error())
+		return token.Error()
 	}
+	return nil
 }
 
-
-func GetCurrentBrightness(client mqtt.Client, device string) int {
+func GetCurrentBrightness(client mqtt.Client, device string) (int, error) {
 	var brightness int
 	messageChannel := make(chan mqtt.Message)
 
@@ -33,7 +33,7 @@ func GetCurrentBrightness(client mqtt.Client, device string) int {
 
 	if token.Error() != nil {
 		log.Error().Msgf("Error subscribing to topic: %v", token.Error())
-		return 0
+		return 0, token.Error()
 	}
 
 	getPayload := map[string]string{
@@ -46,7 +46,8 @@ func GetCurrentBrightness(client mqtt.Client, device string) int {
 		var deviceData map[string]interface{}
 		if err := json.Unmarshal(msg.Payload(), &deviceData); err != nil {
 			log.Error().Msgf("Error unmarshalling device data: %v", err)
-			return 0
+
+			return 0, token.Error()
 		}
 		log.Info().Msgf("Device data: %v", deviceData)
 		if b, ok := deviceData["brightness"].(float64); ok {
@@ -54,13 +55,15 @@ func GetCurrentBrightness(client mqtt.Client, device string) int {
 		}
 	case <-time.After(5 * time.Second):
 		log.Info().Msg("Timeout waiting for brightness")
-		return 0
+
+		return 0, token.Error()
 	}
 
 	client.Unsubscribe("zigbee2mqtt/" + device)
 
 	fmt.Printf("%d", brightness)
-	return brightness
+
+	return brightness, token.Error()
 }
 
 func scaleBrightness(value int) int {

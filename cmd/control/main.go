@@ -59,7 +59,12 @@ func handler(ctx context.Context, event ControlEvent) error {
 	log.Info().Str("MqttServer", pkg.MqttServer).Str("MqttUser", pkg.MqttUser).Str("DeviceFriendlyName", pkg.DeviceFriendlyName).Msg("Environment variables set")
 
 	mqttClient := pkg.NewClient(pkg.MqttServer, pkg.MqttUser, pkg.MqttPassword)
-	pkg.SetBrightness(mqttClient, pkg.DeviceFriendlyName, event.Level)
+	err = pkg.SetBrightness(mqttClient, pkg.DeviceFriendlyName, event.Level)
+
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to update brightness")
+		return err
+	}
 
 	log.Info().Msg("Brightness updated successfully")
 
