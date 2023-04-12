@@ -42,3 +42,12 @@ test-control: build
 .PHONY: deploy
 deploy: build
 	@cd infrastructure && cdk deploy
+
+.PHONY: up
+up:
+	@USER="root" PASSWORD="pass" docker compose config
+	@USER="root" PASSWORD="pass" docker compose up
+
+.PHONY: down
+down:
+	@docker compose down --rmi=all --volumes
