@@ -3,5 +3,5 @@
 touch /mosquitto/config/mosquitto_passwd && \
     mosquitto_passwd -b /mosquitto/config/mosquitto_passwd ${MQTT_USER} ${MQTT_PASSWORD}
 
-# Pass the arguments to the mosquitto command
-exec "$@"
+# Start Mosquitto and run health check script in background
+mosquitto -c /mosquitto/config/mosquitto.conf & /app/health_check.sh

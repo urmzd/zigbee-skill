@@ -8,7 +8,6 @@ import * as path from "node:path";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
-import { writeFileSync } from "fs";
 
 export class SunriseLampStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -166,7 +165,6 @@ export class SunriseLampStack extends cdk.Stack {
       "MQTTBrokerTask",
       {
         taskRole: taskRole,
-
         executionRole: taskExecutionRole,
         memoryLimitMiB: 1024,
         cpu: 512,
@@ -190,29 +188,18 @@ export class SunriseLampStack extends cdk.Stack {
           streamPrefix: "mqtt-broker",
         }),
       })
-      .addPortMappings({
-        containerPort: 1883,
-        hostPort: 1883,
-        protocol: ecs.Protocol.TCP,
-      });
-
-    taskDefinition
-      .addContainer("NginxSidecar", {
-        cpu: 256,
-        memoryLimitMiB: 256,
-        image: ecs.ContainerImage.fromAsset(
-          path.resolve(process.cwd(), "../configs/nginx")
-        ),
-        containerName: "nginx",
-        logging: new ecs.AwsLogDriver({
-          streamPrefix: "nginx-sidecar",
-        }),
-      })
-      .addPortMappings({
-        containerPort: 80,
-        hostPort: 80,
-        protocol: ecs.Protocol.TCP,
-      });
+      .addPortMappings(
+        {
+          containerPort: 1883,
+          hostPort: 1883,
+          protocol: ecs.Protocol.TCP,
+        },
+        {
+          containerPort: 8081,
+          hostPort: 8081,
+          protocol: ecs.Protocol.TCP,
+        }
+      );
 
     const mqttBroker = new ecs.FargateService(this, "MQTTBrokerService", {
       cluster,
@@ -246,9 +233,9 @@ export class SunriseLampStack extends cdk.Stack {
       protocol: elbv2.ApplicationProtocol.HTTP,
       targets: [mqttBroker],
       healthCheck: {
+        port: "8081",
         path: "/",
         protocol: elbv2.Protocol.HTTP,
-        port: "80",
       },
     });
 
