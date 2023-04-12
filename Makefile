@@ -41,7 +41,7 @@ test-control: build
 # Deploy the infrastructure
 .PHONY: deploy
 deploy: build
-	@cd infrastructure && cdk deploy
+	@cd infrastructure && cdk deploy --require-approval=never --concurrency=70
 
 .PHONY: up
 up:

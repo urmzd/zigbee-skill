@@ -26,11 +26,6 @@ export class SunriseLampStack extends cdk.Stack {
           subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
           name: "Private",
         },
-        {
-          cidrMask: 24,
-          subnetType: ec2.SubnetType.PUBLIC,
-          name: "Public",
-        },
       ],
     });
 
@@ -274,6 +269,7 @@ export class SunriseLampStack extends cdk.Stack {
         path: "/",
         protocol: elbv2.Protocol.HTTP,
       },
+      stickinessCookieDuration: cdk.Duration.seconds(60),
     });
 
     const configBucket = new s3.Bucket(this, "ConfigBucket", {
@@ -298,7 +294,7 @@ export class SunriseLampStack extends cdk.Stack {
     mqttLoadBalancerSg.connections.allowFrom(controlSg, ec2.Port.tcp(WS_PORT));
 
     // We call this function several times as scheduled by the schedule lambda.
-    const controlLambda = new lambda.Function(this, "control", {
+    const controlLambda = new lambda.Function(this, "Control", {
       runtime: lambda.Runtime.GO_1_X,
       handler: "control",
       code: lambdasPath,

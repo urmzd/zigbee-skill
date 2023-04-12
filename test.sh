@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
 function cleanup {
-  ./bin/cli --mqtt-password "$ZIGBEE2MQTT_CONFIG_MQTT_PASSWORD" --mqtt-user "$ZIGBEE2MQTT_CONFIG_MQTT_USER" set 0
   docker kill zigbee2mqtt
   docker rm zigbee2mqtt
   kill %1
