@@ -155,9 +155,7 @@ Configuration is stored in SQLite at `~/.config/zigbee-rest/zigbee-rest.db`.
 
 ## Agent Skill
 
-```bash
-npx skills add urmzd/zigbee-rest
-```
+This repo's conventions are available as portable agent skills in [`skills/`](skills/).
 
 ## Tested Hardware
 
