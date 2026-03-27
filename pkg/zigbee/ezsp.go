@@ -81,9 +81,13 @@ const (
 	ezspEnergyScan uint8 = 0x00
 
 	// ZDO constants
-	zdoProfileID            uint16 = 0x0000
-	zdoClusterDeviceAnnce   uint16 = 0x0013
-	zdoClusterMgmtLeaveReq uint16 = 0x0034
+	zdoProfileID                   uint16 = 0x0000
+	zdoClusterActiveEndpointsReq   uint16 = 0x0005
+	zdoClusterActiveEndpointsResp  uint16 = 0x8005
+	zdoClusterSimpleDescriptorReq  uint16 = 0x0004
+	zdoClusterSimpleDescriptorResp uint16 = 0x8004
+	zdoClusterDeviceAnnce          uint16 = 0x0013
+	zdoClusterMgmtLeaveReq        uint16 = 0x0034
 
 	// BDB constants
 	bdbcMinCommissioningTime = 180 // seconds
