@@ -10,8 +10,8 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-	"github.com/urmzd/zigbee-rest/pkg/app"
-	"github.com/urmzd/zigbee-rest/pkg/device"
+	"github.com/urmzd/zigbee-skill/pkg/app"
+	"github.com/urmzd/zigbee-skill/pkg/device"
 )
 
 func main() {
@@ -26,15 +26,15 @@ func main() {
 	}
 
 	// Extract global flags
-	var dbPath, serialPort string
+	var configPath, serialPort string
 	var filtered []string
 	for i := 0; i < len(args); i++ {
 		switch {
-		case args[i] == "--db" && i+1 < len(args):
-			dbPath = args[i+1]
+		case args[i] == "--config" && i+1 < len(args):
+			configPath = args[i+1]
 			i++
-		case strings.HasPrefix(args[i], "--db="):
-			dbPath = args[i][len("--db="):]
+		case strings.HasPrefix(args[i], "--config="):
+			configPath = args[i][len("--config="):]
 		case args[i] == "--port" && i+1 < len(args):
 			serialPort = args[i+1]
 			i++
@@ -53,7 +53,7 @@ func main() {
 
 	ctx := context.Background()
 
-	a, err := app.New(ctx, dbPath, serialPort)
+	a, err := app.New(ctx, configPath, serialPort)
 	if err != nil {
 		fatal("failed to initialize: %s", err)
 	}
@@ -326,7 +326,7 @@ func fatal(format string, args ...any) {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `Usage: zigbee-rest <command> [args]
+	fmt.Fprint(os.Stderr, `Usage: zigbee-skill <command> [args]
 
 Commands:
   health                              Check controller health
@@ -340,14 +340,14 @@ Commands:
   discovery stop                      Stop pairing mode
 
 Global flags:
-  --db <path>       Database path (default: ~/.config/zigbee-rest/zigbee-rest.db)
-  --port <path>     Zigbee serial port (omit if not controlling hardware)
+  --config <path>   Config file path (default: ./zigbee-skill.yaml)
+  --port <path>     Zigbee serial port (overrides config file)
 
 All output is JSON. Pipe to jq for filtering.
 
 Examples:
-  zigbee-rest devices list | jq '.devices[].friendly_name'
-  zigbee-rest devices set bedroom-lamp --state ON --brightness 150
-  zigbee-rest devices state bedroom-lamp | jq '.state'
+  zigbee-skill devices list | jq '.devices[].friendly_name'
+  zigbee-skill devices set bedroom-lamp --state ON --brightness 150
+  zigbee-skill devices state bedroom-lamp | jq '.state'
 `)
 }
