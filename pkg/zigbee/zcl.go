@@ -4,9 +4,20 @@ import "encoding/binary"
 
 // ZCL cluster IDs
 const (
-	zclClusterOnOff        uint16 = 0x0006
-	zclClusterLevelControl uint16 = 0x0008
-	zclClusterKeepAlive    uint16 = 0x0025
+	zclClusterOnOff             uint16 = 0x0006
+	zclClusterLevelControl      uint16 = 0x0008
+	zclClusterColorControl      uint16 = 0x0300
+	zclClusterTemperature       uint16 = 0x0402
+	zclClusterRelativeHumidity  uint16 = 0x0405
+	zclClusterOccupancy         uint16 = 0x0406
+	zclClusterIlluminance       uint16 = 0x0400
+	zclClusterPressure          uint16 = 0x0403
+	zclClusterElectricalMeasure uint16 = 0x0B04
+	zclClusterMetering          uint16 = 0x0702
+	zclClusterDoorLock          uint16 = 0x0101
+	zclClusterWindowCovering    uint16 = 0x0102
+	zclClusterThermostat        uint16 = 0x0201
+	zclClusterKeepAlive         uint16 = 0x0025
 )
 
 // ZCL command IDs for On/Off cluster
