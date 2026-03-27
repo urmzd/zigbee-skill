@@ -21,6 +21,7 @@ type KnownDevice struct {
 	FriendlyName string
 	DeviceType   string
 	Endpoint     uint8
+	Clusters     []uint16 // input clusters from Simple Descriptor
 	State        device.DeviceState
 }
 
@@ -29,6 +30,8 @@ type LoadEntry struct {
 	IEEEAddress  [8]byte
 	FriendlyName string
 	DeviceType   string
+	Endpoint     uint8
+	Clusters     []uint16
 }
 
 // Controller implements device.Controller and device.EventSubscriber
@@ -54,6 +57,32 @@ type Controller struct {
 // SetOnDeviceChange registers a callback invoked after the device list changes.
 func (c *Controller) SetOnDeviceChange(fn func()) { c.onDeviceChange = fn }
 
+// ExportDevices returns a snapshot of all known devices for persistence.
+func (c *Controller) ExportDevices() []ExportedDevice {
+	c.devicesMu.RLock()
+	defer c.devicesMu.RUnlock()
+	out := make([]ExportedDevice, 0, len(c.devices))
+	for ieee, kd := range c.devices {
+		out = append(out, ExportedDevice{
+			IEEEAddress:  ieee,
+			FriendlyName: kd.FriendlyName,
+			DeviceType:   kd.DeviceType,
+			Endpoint:     kd.Endpoint,
+			Clusters:     kd.Clusters,
+		})
+	}
+	return out
+}
+
+// ExportedDevice is a snapshot of device data for persistence.
+type ExportedDevice struct {
+	IEEEAddress  string
+	FriendlyName string
+	DeviceType   string
+	Endpoint     uint8
+	Clusters     []uint16
+}
+
 // notifyDeviceChange calls the registered callback if set.
 func (c *Controller) notifyDeviceChange() {
 	if c.onDeviceChange != nil {
@@ -68,11 +97,16 @@ func (c *Controller) LoadDevices(entries []LoadEntry) {
 	defer c.devicesMu.Unlock()
 	for _, e := range entries {
 		ieee := formatIEEE(e.IEEEAddress)
+		ep := e.Endpoint
+		if ep == 0 {
+			ep = 1
+		}
 		c.devices[ieee] = &KnownDevice{
 			IEEEAddress:  e.IEEEAddress,
 			FriendlyName: e.FriendlyName,
 			DeviceType:   e.DeviceType,
-			Endpoint:     1,
+			Endpoint:     ep,
+			Clusters:     e.Clusters,
 			State:        make(device.DeviceState),
 		}
 	}
@@ -312,9 +346,10 @@ func (c *Controller) handleTrustCenterJoin(data []byte) {
 		Timestamp: time.Now(),
 	})
 
-	// Issue 8: Configure default attribute reporting on newly joined devices (BDB 6.5)
+	// Discover device clusters and configure reporting after a brief stabilization delay.
 	go func() {
-		time.Sleep(2 * time.Second) // brief delay for device to stabilize
+		time.Sleep(2 * time.Second)
+		c.discoverDeviceClusters(kd)
 		c.configureDeviceReporting(kd)
 	}()
 }
@@ -342,11 +377,19 @@ func (c *Controller) handleIncomingMessage(data []byte) {
 
 	message := data[19 : 19+int(msgLen)]
 
+	profileID := binary.LittleEndian.Uint16(data[1:3])
+
 	log.Debug().
 		Uint16("cluster", clusterID).
 		Uint16("sender", sender).
 		Int("msgLen", int(msgLen)).
-		Msg("Incoming ZCL message")
+		Msg("Incoming message")
+
+	// Handle ZDO responses (profile 0x0000)
+	if profileID == zdoProfileID {
+		c.handleZDOResponse(clusterID, sender, message)
+		return
+	}
 
 	// Issue 6: Respond to Keep Alive Read Attributes requests (BDB 7.3.1)
 	if clusterID == zclClusterKeepAlive && len(message) >= 3 {
@@ -433,7 +476,7 @@ func (c *Controller) knownToDevice(ieeeStr string, kd *KnownDevice) device.Devic
 	if name == "" {
 		name = ieeeStr
 	}
-	stateSchema, _ := json.Marshal(lightStateSchema())
+	stateSchema, _ := json.Marshal(buildStateSchema(kd.Clusters))
 	return device.Device{
 		ID:           ieeeStr,
 		Name:         name,
@@ -445,21 +488,101 @@ func (c *Controller) knownToDevice(ieeeStr string, kd *KnownDevice) device.Devic
 	}
 }
 
-// lightStateSchema returns a basic JSON schema for light devices.
-func lightStateSchema() map[string]any {
-	return map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"state": map[string]any{
-				"type": "string",
-				"enum": []string{"ON", "OFF", "TOGGLE"},
-			},
-			"brightness": map[string]any{
-				"type":    "integer",
-				"minimum": 0,
-				"maximum": 254,
-			},
-		},
+// buildStateSchema generates a JSON schema based on the device's actual clusters.
+func buildStateSchema(clusters []uint16) map[string]any {
+	props := map[string]any{}
+	has := func(id uint16) bool {
+		for _, c := range clusters {
+			if c == id {
+				return true
+			}
+		}
+		return false
+	}
+
+	if has(zclClusterOnOff) {
+		props["state"] = map[string]any{
+			"type": "string",
+			"enum": []string{"ON", "OFF", "TOGGLE"},
+		}
+	}
+	if has(zclClusterLevelControl) {
+		props["brightness"] = map[string]any{
+			"type": "integer", "minimum": 0, "maximum": 254,
+		}
+	}
+	if has(zclClusterColorControl) {
+		props["color_temp"] = map[string]any{
+			"type": "integer", "minimum": 153, "maximum": 500,
+			"description": "color temperature in mireds",
+		}
+	}
+	if has(zclClusterTemperature) {
+		props["temperature"] = map[string]any{
+			"type": "number", "readOnly": true,
+			"description": "temperature in °C",
+		}
+	}
+	if has(zclClusterRelativeHumidity) {
+		props["humidity"] = map[string]any{
+			"type": "number", "readOnly": true,
+			"description": "relative humidity %",
+		}
+	}
+	if has(zclClusterOccupancy) {
+		props["occupancy"] = map[string]any{
+			"type": "boolean", "readOnly": true,
+		}
+	}
+	if has(zclClusterDoorLock) {
+		props["lock_state"] = map[string]any{
+			"type": "string",
+			"enum": []string{"LOCK", "UNLOCK"},
+		}
+	}
+	if has(zclClusterThermostat) {
+		props["heating_setpoint"] = map[string]any{
+			"type": "number",
+			"description": "heating setpoint in °C",
+		}
+	}
+
+	// Fallback: if no clusters known, assume on/off
+	if len(props) == 0 {
+		props["state"] = map[string]any{
+			"type": "string",
+			"enum": []string{"ON", "OFF", "TOGGLE"},
+		}
+	}
+
+	return map[string]any{"type": "object", "properties": props}
+}
+
+// deviceTypeFromClusters infers the device type from its cluster list.
+func deviceTypeFromClusters(clusters []uint16) string {
+	has := func(id uint16) bool {
+		for _, c := range clusters {
+			if c == id {
+				return true
+			}
+		}
+		return false
+	}
+
+	switch {
+	case has(zclClusterDoorLock):
+		return device.DeviceTypeLock
+	case has(zclClusterThermostat):
+		return device.DeviceTypeThermostat
+	case has(zclClusterTemperature) || has(zclClusterRelativeHumidity) ||
+		has(zclClusterOccupancy) || has(zclClusterIlluminance) || has(zclClusterPressure):
+		return device.DeviceTypeSensor
+	case has(zclClusterLevelControl) || has(zclClusterColorControl):
+		return device.DeviceTypeLight
+	case has(zclClusterOnOff):
+		return device.DeviceTypeSwitch
+	default:
+		return device.DeviceTypeSwitch
 	}
 }
 
@@ -766,6 +889,173 @@ func (c *Controller) handleKeepAliveRequest(sender uint16, seqNum uint8) {
 	} else {
 		log.Debug().Uint16("sender", sender).Msg("Sent Keep Alive response")
 	}
+}
+
+// discoverDeviceClusters probes a device for known ZCL clusters by sending
+// Read Attributes requests and checking which ones get responses.
+func (c *Controller) discoverDeviceClusters(kd *KnownDevice) {
+	ieeeStr := formatIEEE(kd.IEEEAddress)
+
+	// Probe these clusters — send a Read Attributes for attribute 0x0000 on each.
+	// If the device supports the cluster, it responds; otherwise silence/error.
+	probeClusters := []uint16{
+		zclClusterOnOff,
+		zclClusterLevelControl,
+		zclClusterColorControl,
+		zclClusterTemperature,
+		zclClusterRelativeHumidity,
+		zclClusterOccupancy,
+		zclClusterDoorLock,
+		zclClusterThermostat,
+	}
+
+	for _, cluster := range probeClusters {
+		cmd := BuildReadAttributesCommand(0x0000)
+		_ = c.ezsp.SendUnicast(kd.NodeID, zclProfileHA, cluster, 1, kd.Endpoint, cmd)
+	}
+
+	// Wait for responses — the incoming message handler updates kd.State for
+	// recognized clusters. We check which state keys appeared.
+	time.Sleep(3 * time.Second)
+
+	var discovered []uint16
+	c.devicesMu.Lock()
+	if _, ok := kd.State["state"]; ok {
+		discovered = append(discovered, zclClusterOnOff)
+	}
+	if _, ok := kd.State["brightness"]; ok {
+		discovered = append(discovered, zclClusterLevelControl)
+	}
+	// Even if no state keys were set, check if OnOff responded by looking
+	// at whether the device ACK'd — we assume On/Off at minimum for any
+	// device that successfully joined and responds to messages.
+	if len(discovered) == 0 {
+		discovered = append(discovered, zclClusterOnOff)
+	}
+	kd.Clusters = discovered
+	kd.DeviceType = deviceTypeFromClusters(discovered)
+	c.devicesMu.Unlock()
+
+	c.notifyDeviceChange()
+	log.Info().Str("device", ieeeStr).
+		Int("clusters", len(discovered)).
+		Str("type", kd.DeviceType).
+		Msg("Device clusters discovered")
+}
+
+// handleZDOResponse processes ZDO response messages (Active Endpoints, Simple Descriptor).
+func (c *Controller) handleZDOResponse(clusterID uint16, sender uint16, message []byte) bool {
+	switch clusterID {
+	case zdoClusterActiveEndpointsResp:
+		return c.handleActiveEndpointsResponse(sender, message)
+	case zdoClusterSimpleDescriptorResp:
+		return c.handleSimpleDescriptorResponse(sender, message)
+	}
+	return false
+}
+
+func (c *Controller) handleActiveEndpointsResponse(sender uint16, data []byte) bool {
+	// ZDO Active_EP_rsp: seq(1) + status(1) + nwkAddr(2) + count(1) + endpoints(N)
+	if len(data) < 5 {
+		return false
+	}
+	status := data[1]
+	if status != 0x00 {
+		log.Warn().Uint8("status", status).Uint16("sender", sender).Msg("Active Endpoints response error")
+		return true
+	}
+	count := int(data[4])
+	if len(data) < 5+count {
+		return false
+	}
+	endpoints := data[5 : 5+count]
+
+	log.Debug().Uint16("sender", sender).Int("count", count).Msg("Active Endpoints response")
+
+	// For each endpoint, send Simple Descriptor Request
+	for _, ep := range endpoints {
+		if ep == 0 || ep == 242 { // skip ZDO endpoint and Green Power
+			continue
+		}
+		payload := make([]byte, 3)
+		binary.LittleEndian.PutUint16(payload, sender)
+		payload[2] = ep
+		if err := c.ezsp.SendUnicast(sender, zdoProfileID, zdoClusterSimpleDescriptorReq, 0, 0, payload); err != nil {
+			log.Warn().Err(err).Uint8("endpoint", ep).Msg("Failed to send Simple Descriptor Request")
+		}
+	}
+	return true
+}
+
+func (c *Controller) handleSimpleDescriptorResponse(sender uint16, data []byte) bool {
+	// ZDO Simple_Desc_rsp: seq(1) + status(1) + nwkAddr(2) + length(1) + descriptor(N)
+	// descriptor: endpoint(1) + profileID(2) + deviceID(2) + version(1) + inputCount(1) + inputs(N*2) + outputCount(1) + outputs(N*2)
+	if len(data) < 6 {
+		return false
+	}
+	status := data[1]
+	if status != 0x00 {
+		return true
+	}
+	descLen := int(data[4])
+	if descLen == 0 || len(data) < 5+descLen {
+		return false
+	}
+	desc := data[5 : 5+descLen]
+	if len(desc) < 6 {
+		return false
+	}
+
+	endpoint := desc[0]
+	// profileID := binary.LittleEndian.Uint16(desc[1:3])
+	// deviceID := binary.LittleEndian.Uint16(desc[3:5])
+	// version := desc[5]
+
+	pos := 6
+	if pos >= len(desc) {
+		return false
+	}
+	inputCount := int(desc[pos])
+	pos++
+
+	var inputClusters []uint16
+	for i := range inputCount {
+		_ = i
+		if pos+2 > len(desc) {
+			break
+		}
+		inputClusters = append(inputClusters, binary.LittleEndian.Uint16(desc[pos:pos+2]))
+		pos += 2
+	}
+
+	log.Info().
+		Uint16("sender", sender).
+		Uint8("endpoint", endpoint).
+		Int("inputClusters", len(inputClusters)).
+		Msg("Simple Descriptor response")
+
+	// Update the device with discovered clusters
+	c.devicesMu.Lock()
+	for _, kd := range c.devices {
+		if kd.NodeID == sender {
+			kd.Endpoint = endpoint
+			// Merge clusters (device may have multiple endpoints)
+			seen := map[uint16]bool{}
+			for _, cl := range kd.Clusters {
+				seen[cl] = true
+			}
+			for _, cl := range inputClusters {
+				if !seen[cl] {
+					kd.Clusters = append(kd.Clusters, cl)
+				}
+			}
+			kd.DeviceType = deviceTypeFromClusters(kd.Clusters)
+			break
+		}
+	}
+	c.devicesMu.Unlock()
+	c.notifyDeviceChange()
+	return true
 }
 
 // configureDeviceReporting sends default reporting configuration to a newly joined device (BDB 6.5).
