@@ -16,16 +16,22 @@ const (
 	ezspSetConfigurationValue uint16 = 0x0053
 	ezspGetNetworkParameters  uint16 = 0x0028
 	ezspNetworkInit           uint16 = 0x0017
+	ezspStartScan             uint16 = 0x001A
 	ezspFormNetwork           uint16 = 0x001E
 	ezspPermitJoining         uint16 = 0x0022
 	ezspSendUnicast           uint16 = 0x0034
+	ezspSendBroadcast         uint16 = 0x0036
 	ezspGetEUI64              uint16 = 0x0026
+	ezspSetPolicy             uint16 = 0x0055
+	ezspGetNodeID             uint16 = 0x0027
 
 	// Callbacks
-	ezspTrustCenterJoinHandler uint16 = 0x0024
-	ezspIncomingMessageHandler uint16 = 0x0045
-	ezspMessageSentHandler     uint16 = 0x003F
-	ezspStackStatusHandler     uint16 = 0x0019
+	ezspTrustCenterJoinHandler     uint16 = 0x0024
+	ezspIncomingMessageHandler     uint16 = 0x0045
+	ezspMessageSentHandler         uint16 = 0x003F
+	ezspStackStatusHandler         uint16 = 0x0019
+	ezspScanCompleteHandler        uint16 = 0x001C
+	ezspEnergyScanResultHandler    uint16 = 0x0048
 
 	// EZSP config IDs
 	ezspConfigStackProfile                uint8 = 0x0C
@@ -53,8 +59,34 @@ const (
 	emberJoinedNetwork  = 0x02 //nolint:unused
 
 	// Send options
+	// EMBER_APS_OPTION_RETRY enables APS-layer retries with acknowledgement,
+	// satisfying BDB 6.10 requirement for APS Acknowledgement usage.
 	emberApsOptionRetry                = 0x0040
 	emberApsOptionEnableRouteDiscovery = 0x0100
+
+	// EZSP policy IDs
+	ezspPolicyTrustCenterPolicy   uint8 = 0x00
+	ezspPolicyTCKeyRequestPolicy  uint8 = 0x05
+	ezspPolicyAppKeyRequestPolicy uint8 = 0x06 //nolint:unused
+
+	// EZSP policy decisions
+	ezspDecisionAllowJoinsRejoinsHaveKey uint8 = 0x04
+	ezspDecisionAllowKeyRequests         uint8 = 0x01 //nolint:unused
+
+	// BDB channel sets (2.4GHz, bitmask where bit N = channel N)
+	bdbcTLPrimaryChannelSet   uint32 = 0x02108800 // channels 11, 15, 20, 25
+	bdbcTLSecondaryChannelSet uint32 = 0x05EF7000 // remaining 2.4GHz channels
+
+	// Scan types
+	ezspEnergyScan uint8 = 0x00
+
+	// ZDO constants
+	zdoProfileID            uint16 = 0x0000
+	zdoClusterDeviceAnnce   uint16 = 0x0013
+	zdoClusterMgmtLeaveReq uint16 = 0x0034
+
+	// BDB constants
+	bdbcMinCommissioningTime = 180 // seconds
 )
 
 // EZSPLayer handles EZSP command/response framing over ASH.
@@ -129,7 +161,7 @@ func (e *EZSPLayer) SendCommand(frameID uint16, params []byte) ([]byte, error) {
 		// Extended 5-byte header: seq(1) + frameControl(2) + frameID(2) + params
 		frame = make([]byte, 0, 5+len(params))
 		frame = append(frame, seq)
-		frame = append(frame, 0x01, 0x00)                      // FC_lo=0x01 (frame format v1), FC_hi=0x00
+		frame = append(frame, 0x00, 0x01)                      // FC_lo=0x00 (command), FC_hi=0x01 (extended frame format v1)
 		frame = append(frame, byte(frameID), byte(frameID>>8)) // frameID as LE uint16
 		frame = append(frame, params...)
 	} else {
@@ -176,59 +208,66 @@ func (e *EZSPLayer) readLoop() {
 
 // processFrame decodes and dispatches an EZSP frame.
 func (e *EZSPLayer) processFrame(data []byte) {
-	var frameID uint16
-	var params []byte
-	var isCallback bool
-
-	if e.extendedFormat {
-		// Extended 5-byte header: seq(1) + frameControl(2) + frameID(2) + params
-		if len(data) < 5 {
-			log.Debug().Int("len", len(data)).Msg("EZSP frame too short (extended)")
-			return
-		}
-		frameID = binary.LittleEndian.Uint16(data[3:5])
-		params = data[5:]
-		isCallback = isCallbackFrameID(frameID)
-	} else {
-		// Legacy 3-byte header: seq(1) + frameControl(1) + frameID(1) + params
-		if len(data) < 3 {
-			log.Debug().Int("len", len(data)).Msg("EZSP frame too short (legacy)")
-			return
-		}
-		frameControl := data[1]
-		frameID = uint16(data[2])
-		params = data[3:]
-		isCallback = frameControl&0x04 != 0
-	}
-
-	log.Debug().
-		Uint16("frameID", frameID).
-		Bool("callback", isCallback).
-		Int("params_len", len(params)).
-		Str("raw_hex", hex.EncodeToString(data)).
-		Msg("EZSP RX frame")
-
-	if isCallback {
-		e.callbackMu.RLock()
-		handler := e.callbackHandler
-		e.callbackMu.RUnlock()
-
-		if handler != nil {
-			handler(frameID, params)
-		}
+	if len(data) < 3 {
+		log.Debug().Int("len", len(data)).Msg("EZSP frame too short")
 		return
 	}
 
-	// Response — deliver to waiting goroutine
-	e.responseMu.Lock()
-	ch, ok := e.responseChan[frameID]
-	e.responseMu.Unlock()
+	// Try to parse and deliver the frame. In extended mode, try extended first
+	// then legacy fallback — the version response is always legacy even when
+	// the NCP is in extended mode.
+	type parsed struct {
+		frameID uint16
+		params  []byte
+	}
 
-	if ok {
-		select {
-		case ch <- params:
-		default:
+	var candidates []parsed
+
+	if e.extendedFormat && len(data) >= 5 {
+		candidates = append(candidates, parsed{
+			frameID: binary.LittleEndian.Uint16(data[3:5]),
+			params:  data[5:],
+		})
+	}
+	// Always include legacy parse as fallback (or primary in legacy mode).
+	candidates = append(candidates, parsed{
+		frameID: uint16(data[2]),
+		params:  data[3:],
+	})
+
+	for _, c := range candidates {
+		e.responseMu.Lock()
+		ch, ok := e.responseChan[c.frameID]
+		e.responseMu.Unlock()
+
+		if ok {
+			log.Debug().
+				Uint16("frameID", c.frameID).
+				Int("params_len", len(c.params)).
+				Str("raw_hex", hex.EncodeToString(data)).
+				Msg("EZSP RX response")
+			select {
+			case ch <- c.params:
+			default:
+			}
+			return
 		}
+	}
+
+	// No pending response matched — use the preferred parse for callback dispatch.
+	best := candidates[0]
+	log.Debug().
+		Uint16("frameID", best.frameID).
+		Int("params_len", len(best.params)).
+		Str("raw_hex", hex.EncodeToString(data)).
+		Msg("EZSP RX callback")
+
+	e.callbackMu.RLock()
+	handler := e.callbackHandler
+	e.callbackMu.RUnlock()
+
+	if handler != nil {
+		handler(best.frameID, best.params)
 	}
 }
 
@@ -239,7 +278,9 @@ func isCallbackFrameID(id uint16) bool {
 	case ezspTrustCenterJoinHandler,
 		ezspIncomingMessageHandler,
 		ezspMessageSentHandler,
-		ezspStackStatusHandler:
+		ezspStackStatusHandler,
+		ezspScanCompleteHandler,
+		ezspEnergyScanResultHandler:
 		return true
 	default:
 		return false
@@ -274,13 +315,20 @@ func (e *EZSPLayer) NegotiateVersion() (uint8, uint8, uint16, error) {
 			Uint8("ncpSupports", ncpVersion).
 			Msg("EZSP version mismatch, retrying with NCP version")
 
-		// EZSP v8+ requires extended frame format. Switch before the retry
-		// so the NCP sees the correct frame format version in FC_lo.
-		// No ASH reset — bellows doesn't do one and the NCP doesn't need it.
-		if ncpVersion >= 8 {
-			e.extendedFormat = true
-			log.Debug().Msg("Switching to extended EZSP frame format for version retry")
+		// The NCP requires a full ASH RST/RSTACK cycle before it will accept
+		// another version command after a mismatch (see UG101 §3.1).
+		if err := e.ash.Reset(); err != nil {
+			return 0, 0, 0, fmt.Errorf("ASH reset before version retry: %w", err)
 		}
+
+		// The version command always uses legacy frame format — the NCP only
+		// switches to extended format after a successful version exchange.
+		// Keep extendedFormat=false here; switch after we get the 4-byte response.
+
+		// Reset EZSP sequence after ASH reset.
+		e.seqMu.Lock()
+		e.seq = 0
+		e.seqMu.Unlock()
 
 		resp, err = e.SendCommand(ezspVersion, []byte{ncpVersion})
 		if err != nil {
@@ -306,10 +354,32 @@ func (e *EZSPLayer) NegotiateVersion() (uint8, uint8, uint16, error) {
 		Uint16("stackVersion", stackVersion).
 		Msg("EZSP version negotiated")
 
-	// Switch to extended frame format now that version negotiation is complete
+	// EZSP v8+ requires extended frame format for all non-version commands.
+	// The NCP must see an extended-format version command after ASH reset to
+	// confirm the format switch. The version RESPONSE is always in legacy format
+	// (processFrame's legacy fallback handles this).
 	if protocolVersion >= 8 {
+		if err := e.ash.Reset(); err != nil {
+			return 0, 0, 0, fmt.Errorf("ASH reset for format switch: %w", err)
+		}
 		e.extendedFormat = true
-		log.Debug().Msg("Switched to extended EZSP frame format")
+		e.seqMu.Lock()
+		e.seq = 0
+		e.seqMu.Unlock()
+
+		log.Debug().Msg("Sending extended-format version command to confirm format switch")
+		resp, err = e.SendCommand(ezspVersion, []byte{protocolVersion})
+		if err != nil {
+			return 0, 0, 0, fmt.Errorf("extended format confirmation: %w", err)
+		}
+		log.Debug().
+			Int("len", len(resp)).
+			Str("raw", hex.EncodeToString(resp)).
+			Msg("EZSP version response (extended confirm)")
+		if len(resp) < 4 {
+			return 0, 0, 0, fmt.Errorf("extended confirm response too short: %d", len(resp))
+		}
+		log.Info().Msg("Extended EZSP frame format confirmed")
 	}
 
 	return protocolVersion, stackType, stackVersion, nil
@@ -483,8 +553,10 @@ func (e *EZSPLayer) SendUnicast(nodeID uint16, profileID, clusterID uint16, srcE
 	apsFrame = append(apsFrame, dstEndpoint)                         // destinationEndpoint
 	options := uint16(emberApsOptionRetry | emberApsOptionEnableRouteDiscovery)
 	apsFrame = append(apsFrame, byte(options), byte(options>>8)) // options
-	apsFrame = append(apsFrame, 0x00, 0x00)                      // groupId
-	apsFrame = append(apsFrame, 0x00)                            // sequence (filled by stack)
+	apsFrame = append(apsFrame, 0x00, 0x00) // groupId
+	// APS frame counter is managed by the NCP stack (BDB 6.2 / R23.2 §2.2.7).
+	// No host-side tracking is needed.
+	apsFrame = append(apsFrame, 0x00) // sequence (filled by stack)
 
 	// Build sendUnicast params:
 	// type (1) + indexOrDestination (2) + apsFrame (12) + messageTag (1) + messageLength (1) + message
@@ -506,6 +578,156 @@ func (e *EZSPLayer) SendUnicast(nodeID uint16, profileID, clusterID uint16, srcE
 			status = resp[0]
 		}
 		return fmt.Errorf("sendUnicast failed: status 0x%02X", status)
+	}
+	return nil
+}
+
+// SetPolicy sets an EZSP Trust Center or stack policy (BDB 5.6.1).
+func (e *EZSPLayer) SetPolicy(policyID uint8, decisionID uint8) error {
+	params := []byte{policyID, decisionID}
+	resp, err := e.SendCommand(ezspSetPolicy, params)
+	if err != nil {
+		return err
+	}
+	if len(resp) < 1 || resp[0] != emberSuccess {
+		status := byte(0xFF)
+		if len(resp) >= 1 {
+			status = resp[0]
+		}
+		return fmt.Errorf("setPolicy 0x%02X failed: status 0x%02X", policyID, status)
+	}
+	return nil
+}
+
+// GetNodeID retrieves the coordinator's short network address.
+func (e *EZSPLayer) GetNodeID() (uint16, error) {
+	resp, err := e.SendCommand(ezspGetNodeID, nil)
+	if err != nil {
+		return 0, err
+	}
+	if len(resp) < 2 {
+		return 0, fmt.Errorf("getNodeID response too short: %d bytes", len(resp))
+	}
+	return binary.LittleEndian.Uint16(resp[0:2]), nil
+}
+
+// EnergyScan performs an IEEE 802.15.4 energy scan across the given channel mask
+// and returns the channel with the lowest detected energy (BDB 8.1).
+func (e *EZSPLayer) EnergyScan(channelMask uint32, duration uint8) (uint8, error) {
+	type scanResult struct {
+		channel uint8
+		rssi    int8
+	}
+
+	results := make(chan scanResult, 27)
+	done := make(chan uint8, 1)
+
+	e.callbackMu.RLock()
+	origHandler := e.callbackHandler
+	e.callbackMu.RUnlock()
+
+	e.callbackMu.Lock()
+	e.callbackHandler = func(frameID uint16, data []byte) {
+		switch frameID {
+		case ezspEnergyScanResultHandler:
+			if len(data) >= 2 {
+				results <- scanResult{channel: data[0], rssi: int8(data[1])}
+			}
+		case ezspScanCompleteHandler:
+			if len(data) >= 1 {
+				done <- data[0]
+			}
+		default:
+			if origHandler != nil {
+				origHandler(frameID, data)
+			}
+		}
+	}
+	e.callbackMu.Unlock()
+
+	defer func() {
+		e.callbackMu.Lock()
+		e.callbackHandler = origHandler
+		e.callbackMu.Unlock()
+	}()
+
+	params := make([]byte, 7)
+	params[0] = ezspEnergyScan
+	binary.LittleEndian.PutUint32(params[1:5], channelMask)
+	params[5] = duration
+	params[6] = 0
+
+	resp, err := e.SendCommand(ezspStartScan, params)
+	if err != nil {
+		return 0, fmt.Errorf("startScan: %w", err)
+	}
+	if len(resp) < 1 || resp[0] != emberSuccess {
+		status := byte(0xFF)
+		if len(resp) >= 1 {
+			status = resp[0]
+		}
+		return 0, fmt.Errorf("startScan failed: status 0x%02X", status)
+	}
+
+	var bestChannel uint8
+	bestRSSI := int8(127)
+
+	timeout := time.After(30 * time.Second)
+	for {
+		select {
+		case r := <-results:
+			log.Debug().Uint8("channel", r.channel).Int8("rssi", r.rssi).Msg("Energy scan result")
+			if r.rssi < bestRSSI {
+				bestRSSI = r.rssi
+				bestChannel = r.channel
+			}
+		case status := <-done:
+			if status != emberSuccess {
+				log.Warn().Uint8("status", status).Msg("Scan completed with error")
+			}
+			if bestChannel == 0 {
+				return 0, fmt.Errorf("no channels found in energy scan")
+			}
+			log.Info().Uint8("channel", bestChannel).Int8("rssi", bestRSSI).Msg("Best channel from energy scan")
+			return bestChannel, nil
+		case <-timeout:
+			return 0, fmt.Errorf("energy scan timed out")
+		case <-e.stopChan:
+			return 0, fmt.Errorf("stopped")
+		}
+	}
+}
+
+// SendBroadcast sends a broadcast message (used for ZDO Device_annce etc).
+func (e *EZSPLayer) SendBroadcast(destination uint16, profileID, clusterID uint16, srcEndpoint, dstEndpoint uint8, payload []byte, radius uint8) error {
+	apsFrame := make([]byte, 0, 12)
+	apsFrame = append(apsFrame, byte(profileID), byte(profileID>>8))
+	apsFrame = append(apsFrame, byte(clusterID), byte(clusterID>>8))
+	apsFrame = append(apsFrame, srcEndpoint)
+	apsFrame = append(apsFrame, dstEndpoint)
+	options := uint16(0)
+	apsFrame = append(apsFrame, byte(options), byte(options>>8))
+	apsFrame = append(apsFrame, 0x00, 0x00) // groupId
+	apsFrame = append(apsFrame, 0x00)       // sequence (filled by stack)
+
+	params := make([]byte, 0, 2+len(apsFrame)+3+len(payload))
+	params = append(params, byte(destination), byte(destination>>8))
+	params = append(params, apsFrame...)
+	params = append(params, radius)
+	params = append(params, 0x01)               // messageTag
+	params = append(params, byte(len(payload))) // messageLength
+	params = append(params, payload...)
+
+	resp, err := e.SendCommand(ezspSendBroadcast, params)
+	if err != nil {
+		return err
+	}
+	if len(resp) < 1 || resp[0] != emberSuccess {
+		status := byte(0xFF)
+		if len(resp) >= 1 {
+			status = resp[0]
+		}
+		return fmt.Errorf("sendBroadcast failed: status 0x%02X", status)
 	}
 	return nil
 }
