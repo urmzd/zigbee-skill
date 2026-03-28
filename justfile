@@ -1,10 +1,14 @@
 # Default recipe
 default: check
 
-# Build the zigbee-skill binary
+# Build the zigbee-skill binary to bin/
 build:
     mkdir -p bin
-    go build -o bin/zigbee-skill ./cmd/cli
+    go build -o bin/zigbee-skill ./cmd/zigbee-skill
+
+# Install zigbee-skill to $GOPATH/bin (or $HOME/go/bin)
+install:
+    go install ./cmd/zigbee-skill
 
 # Clean build artifacts
 clean:
