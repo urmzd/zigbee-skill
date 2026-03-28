@@ -167,7 +167,7 @@ func (c *DaemonClient) IsConnected() bool {
 	var result struct {
 		Connected bool `json:"connected"`
 	}
-	json.NewDecoder(resp.Body).Decode(&result)
+	_ = json.NewDecoder(resp.Body).Decode(&result)
 	return result.Connected
 }
 
@@ -181,7 +181,7 @@ func checkErr(resp *http.Response) error {
 	var result struct {
 		Error string `json:"error"`
 	}
-	json.NewDecoder(resp.Body).Decode(&result)
+	_ = json.NewDecoder(resp.Body).Decode(&result)
 	msg := result.Error
 	if msg == "" {
 		msg = resp.Status

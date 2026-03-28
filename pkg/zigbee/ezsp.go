@@ -64,9 +64,6 @@ const (
 	emberJoinedNetwork  = 0x02 //nolint:unused
 
 	// Send options
-	// EMBER_APS_OPTION_ENCRYPTION enables APS-layer encryption using the
-	// Trust Center link key, required for security-compliant devices.
-	emberApsOptionEncryption = 0x0020
 	// EMBER_APS_OPTION_RETRY enables APS-layer retries with acknowledgement,
 	// satisfying BDB 6.10 requirement for APS Acknowledgement usage.
 	emberApsOptionRetry                = 0x0040
@@ -301,22 +298,6 @@ func (e *EZSPLayer) processFrame(data []byte) {
 
 	if handler != nil {
 		handler(best.frameID, best.params)
-	}
-}
-
-// isCallbackFrameID returns true if the given frame ID is a known EZSP async callback.
-// Used for extended format where FC bits don't reliably indicate callbacks.
-func isCallbackFrameID(id uint16) bool {
-	switch id {
-	case ezspTrustCenterJoinHandler,
-		ezspIncomingMessageHandler,
-		ezspMessageSentHandler,
-		ezspStackStatusHandler,
-		ezspScanCompleteHandler,
-		ezspEnergyScanResultHandler:
-		return true
-	default:
-		return false
 	}
 }
 

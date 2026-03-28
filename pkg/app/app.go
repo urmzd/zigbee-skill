@@ -2,8 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/hex"
-	"strings"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -89,26 +87,6 @@ func (a *App) Close() {
 	}
 }
 
-// configToLoadEntries converts config device entries to controller load entries.
-func configToLoadEntries(cfg *config.Config) []zigbee.LoadEntry {
-	entries := make([]zigbee.LoadEntry, 0, len(cfg.Devices))
-	for _, d := range cfg.Devices {
-		ieee, err := parseIEEE(d.IEEEAddress)
-		if err != nil {
-			log.Warn().Str("ieee", d.IEEEAddress).Err(err).Msg("Skipping device with invalid IEEE address")
-			continue
-		}
-		entries = append(entries, zigbee.LoadEntry{
-			IEEEAddress:  ieee,
-			FriendlyName: d.FriendlyName,
-			DeviceType:   d.Type,
-			Endpoint:     d.Endpoint,
-			Clusters:     d.Clusters,
-		})
-	}
-	return entries
-}
-
 // syncDevicesToConfig exports the controller's in-memory devices to config.
 func syncDevicesToConfig(zb *zigbee.Controller, cfg *config.Config) {
 	exported := zb.ExportDevices()
@@ -125,19 +103,3 @@ func syncDevicesToConfig(zb *zigbee.Controller, cfg *config.Config) {
 	}
 }
 
-// parseIEEE converts a colon-separated IEEE address string to [8]byte.
-// The string is big-endian (MSB first, as formatted by formatIEEE),
-// but the [8]byte is little-endian (LSB at index 0).
-func parseIEEE(s string) ([8]byte, error) {
-	var addr [8]byte
-	clean := strings.ReplaceAll(s, ":", "")
-	b, err := hex.DecodeString(clean)
-	if err != nil || len(b) != 8 {
-		return addr, err
-	}
-	// Reverse: big-endian string → little-endian byte array
-	for i := range 8 {
-		addr[i] = b[7-i]
-	}
-	return addr, nil
-}
