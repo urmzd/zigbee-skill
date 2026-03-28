@@ -21,9 +21,17 @@ ls /dev/ttyUSB* /dev/ttyACM*
 ```
 
 Common port names:
-- `/dev/cu.SLAB_USBtoUART` (macOS, SiLabs CP210x driver)
-- `/dev/cu.usbserial-XXXX` (macOS, generic FTDI/CP210x)
+- `/dev/cu.usbserial-XXXX` (macOS, Sonoff V2 / EFR32-based dongles)
 - `/dev/ttyUSB0` (Linux)
+
+**Important:** If you have multiple USB-serial devices, verify you're using the correct one. The Sonoff Zigbee 3.0 USB Dongle Plus V2 typically appears as `/dev/cu.usbserial-XXXX`. You can confirm with:
+
+```bash
+# macOS — look for "Sonoff Zigbee" in the output
+ioreg -p IOUSB -l | grep -B 2 -A 8 '"USB Product Name"'
+```
+
+A CP210x bridge (`/dev/cu.SLAB_USBtoUART`) may be a different device (e.g., Sonoff V1 with a TI CC2652 chip) that uses a completely different protocol (Z-Stack/ZNP, not EZSP). Connecting to the wrong adapter will appear to work at the serial level but devices will never respond to commands.
 
 ## EZSP Protocol
 
@@ -92,9 +100,44 @@ If a device doesn't reconnect after 30 seconds:
 2. If that doesn't work, factory reset it (hold the button for 10+ seconds until the LED blinks rapidly)
 3. Re-pair via `zigbee-skill discovery start`
 
+### My device joined but keeps blinking / doesn't respond to commands
+
+The device is stuck in commissioning mode — it joined at the MAC layer but never completed the Trust Center key exchange (it didn't receive the network key). Symptoms:
+
+- `Message delivered successfully` in logs but device doesn't act
+- Device LED keeps blinking (pairing mode)
+- Zero `Incoming message` callbacks from the device
+- Device may rejoin repeatedly with different NodeIDs
+
+**Fix:** Reset the network and re-pair:
+
+```bash
+zigbee-skill daemon stop
+zigbee-skill network reset
+zigbee-skill daemon start --port /dev/cu.usbserial-XXXX
+zigbee-skill discovery start --wait-for 1
+```
+
+Then factory-reset your device (hold button ~10s) and let it re-pair. The device LED should stop blinking once the key exchange completes.
+
+**Root cause:** The NCP's Trust Center security state must be configured before the network is initialized. If the coordinator resumed an existing network without setting security state, joining devices can't receive the network key.
+
+### How do I reset the Zigbee network?
+
+```bash
+zigbee-skill network reset
+```
+
+This clears the NCP's persisted network state. On the next startup, a fresh network is formed with a new PAN ID, channel, and network key. All previously paired devices will need to be factory-reset and re-paired.
+
+Use this when:
+- Devices join but can't communicate (security state issue)
+- You want to start fresh on a different channel
+- You switched adapters and need a clean network
+
 ### The coordinator says "No existing network, forming new one"
 
-This is normal on first run. The coordinator forms a new Zigbee network with a random PAN ID and extended PAN ID on the best available channel (determined by energy scan). On subsequent runs, it resumes the existing network from NCP flash.
+This is normal on first run or after `network reset`. The coordinator forms a new Zigbee network with a random PAN ID and extended PAN ID on the best available channel (determined by energy scan). On subsequent runs, it resumes the existing network from NCP flash.
 
 ## Common Errors
 
