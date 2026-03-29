@@ -258,6 +258,7 @@ func (a *ASHLayer) readLoop() {
 				return
 			}
 			log.Error().Err(err).Msg("ASH read error")
+			time.Sleep(time.Second)
 			continue
 		}
 

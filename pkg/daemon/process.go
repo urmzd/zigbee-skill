@@ -77,27 +77,28 @@ func StopDaemon(pidPath string) error {
 }
 
 // Fork re-executes the current binary with --daemon-foreground in the background.
-func Fork(logPath string, args []string) error {
+// The child process manages its own log file via lumberjack (size-capped rotation),
+// so stdout/stderr are discarded here.
+func Fork(args []string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve executable: %w", err)
 	}
 
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	devNull, err := os.Open(os.DevNull)
 	if err != nil {
-		return fmt.Errorf("open log file %s: %w", logPath, err)
+		return fmt.Errorf("open %s: %w", os.DevNull, err)
 	}
+	defer devNull.Close()
 
 	cmd := exec.Command(exe, args...)
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
+	cmd.Stdout = devNull
+	cmd.Stderr = devNull
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 	if err := cmd.Start(); err != nil {
-		logFile.Close()
 		return fmt.Errorf("start daemon process: %w", err)
 	}
 
-	logFile.Close()
 	return nil
 }

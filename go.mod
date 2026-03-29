@@ -6,6 +6,7 @@ require (
 	github.com/rs/zerolog v1.29.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	go.bug.st/serial v1.6.4
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
 require (
