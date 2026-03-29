@@ -349,7 +349,7 @@ func (c *Controller) handleCallback(frameID uint16, data []byte) {
 	case ezspMessageSentHandler:
 		c.handleMessageSent(data)
 	default:
-		log.Info().Uint16("frameID", frameID).Hex("data", data).Msg("Unhandled EZSP callback")
+		log.Debug().Uint16("frameID", frameID).Hex("data", data).Msg("Unhandled EZSP callback")
 	}
 }
 
@@ -368,7 +368,7 @@ func (c *Controller) handleMessageSent(data []byte) {
 	status := data[16]
 
 	if status == emberSuccess {
-		log.Info().
+		log.Debug().
 			Uint8("type", msgType).
 			Uint16("destination", destination).
 			Uint16("cluster", clusterID).
@@ -484,7 +484,7 @@ func (c *Controller) handleIncomingMessage(data []byte) {
 
 	profileID := binary.LittleEndian.Uint16(data[1:3])
 
-	log.Info().
+	log.Debug().
 		Uint16("cluster", clusterID).
 		Uint16("sender", sender).
 		Uint16("profile", profileID).
@@ -569,7 +569,7 @@ func (c *Controller) handleStackStatus(data []byte) {
 	case emberNetworkDown:
 		log.Warn().Msg("Stack status: network down")
 	default:
-		log.Info().Uint8("status", status).Msg("Stack status changed")
+		log.Debug().Uint8("status", status).Msg("Stack status changed")
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 	"github.com/urmzd/zigbee-skill/pkg/device"
 	"github.com/urmzd/zigbee-skill/pkg/device/schema"
 	"github.com/urmzd/zigbee-skill/pkg/zigbee"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 // Set via -ldflags at build time.
@@ -87,7 +88,14 @@ func main() {
 
 	// Internal: run as foreground daemon (called by Fork).
 	if daemonForeground {
-		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+		// Use size-capped rotating log file to prevent unbounded growth.
+		log.Logger = zerolog.New(&lumberjack.Logger{
+			Filename:   logPath,
+			MaxSize:    10, // megabytes
+			MaxBackups: 2,
+			Compress:   true,
+		}).With().Timestamp().Logger()
+		zerolog.SetGlobalLevel(zerolog.WarnLevel)
 		log.Info().Str("version", version).Msg("Starting zigbee-skill daemon")
 		srv := daemon.NewServer(socketPath, pidPath)
 		if err := srv.Start(configPath, serialPort); err != nil {
@@ -386,7 +394,7 @@ func cmdDaemon(args []string, socketPath, pidPath, logPath, configPath, serialPo
 		}
 		forkArgs = append(forkArgs, "--socket", socketPath, "--pid", pidPath, "--log", logPath)
 
-		if err := daemon.Fork(logPath, forkArgs); err != nil {
+		if err := daemon.Fork(forkArgs); err != nil {
 			return fmt.Errorf("start daemon: %w", err)
 		}
 		// Wait for socket to appear (up to 30 seconds — device NodeID
