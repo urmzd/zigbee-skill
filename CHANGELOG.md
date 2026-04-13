@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.0 (2026-04-13)
+
+### Features
+
+- **cli**: migrate to Cobra; add update, version, and install.sh ([7a19047](https://github.com/urmzd/zigbee-skill/commit/7a1904788ea6f2790c12e4cccfd2ffa466426f5d))
+
+### Miscellaneous
+
+- apply gofmt formatting ([1e33216](https://github.com/urmzd/zigbee-skill/commit/1e33216793148acb85e73b2ec4863ed3914f0d4f))
+- migrate sr config and action to v4 ([a76a37b](https://github.com/urmzd/zigbee-skill/commit/a76a37b9572c70a22ce58ce5eace4a0e38c407ec))
+- **deps**: bump actions/create-github-app-token from 1 to 3 ([c676bde](https://github.com/urmzd/zigbee-skill/commit/c676bdeddf69b6ad4382eb5c389cfe0557b1ce97))
+
+[Full Changelog](https://github.com/urmzd/zigbee-skill/compare/v0.2.0...v0.3.0)
+
+
 ## 0.2.0 (2026-03-30)
 
 ### Features
