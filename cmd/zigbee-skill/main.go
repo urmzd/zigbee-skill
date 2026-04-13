@@ -25,13 +25,13 @@ var version = "dev"
 
 // Global flags shared across commands.
 var (
-	configPath      string
-	serialPort      string
-	socketPath      string
-	pidPath         string
-	logPath         string
+	configPath       string
+	serialPort       string
+	socketPath       string
+	pidPath          string
+	logPath          string
 	daemonForeground bool
-	noCache         bool
+	noCache          bool
 )
 
 // Shared app instance initialised by PersistentPreRunE.
