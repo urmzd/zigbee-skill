@@ -54,19 +54,21 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - uses: urmzd/sr@v4
+      - name: Build release binaries
+        run: |
+          mkdir -p bin
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            GOOS=${target%/*}
+            GOARCH=${target#*/}
+            output="bin/zigbee-skill-${GOOS}-${GOARCH}"
+            GOOS=$GOOS GOARCH=$GOARCH CGO_ENABLED=0 go build -o "$output" ./cmd/zigbee-skill
+          done
+
+      - uses: urmzd/sr@v7
         id: sr
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           force: ${{ inputs.force || false }}
-          build-command: |
-            mkdir -p bin
-            for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
-              GOOS=${target%/*}
-              GOARCH=${target#*/}
-              output="bin/zigbee-skill-${GOOS}-${GOARCH}"
-              GOOS=$GOOS GOARCH=$GOARCH CGO_ENABLED=0 go build -o "$output" ./cmd/zigbee-skill
-            done
           artifacts: "bin/*"
 
     outputs:
