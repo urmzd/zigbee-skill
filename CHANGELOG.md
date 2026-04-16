@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1 (2026-04-16)
+
+### Bug Fixes
+
+- **ci**: migrate sr v4 to v7 for artifact and input support (#12) ([e28a7b0](https://github.com/urmzd/zigbee-skill/commit/e28a7b0e6607e829e744d902fbd96bada4e20205))
+
+[Full Changelog](https://github.com/urmzd/zigbee-skill/compare/v0.3.0...v0.3.1)
+
+
 ## 0.3.0 (2026-04-13)
 
 ### Features
