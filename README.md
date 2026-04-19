@@ -13,6 +13,8 @@
 
 <p align="center">
   <a href="https://github.com/urmzd/zigbee-skill/actions/workflows/ci.yml"><img src="https://github.com/urmzd/zigbee-skill/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  &nbsp;
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/urmzd/zigbee-skill" alt="License"></a>
 </p>
 
 ## Showcase
@@ -212,10 +214,6 @@ Configuration is stored in `zigbee-skill.yaml` (current directory by default, ov
 
 The daemon holds the serial connection and Zigbee network state in memory. CLI commands communicate with the daemon over a Unix socket. Without the daemon, the CLI connects directly to the serial port (but devices must rejoin each time).
 
-## Agent Skill
-
-This repo's conventions are available as portable agent skills in [`skills/`](skills/).
-
 ## Specifications
 
 This project implements the Zigbee PRO stack. The relevant specs are available (free, registration required) from the [CSA specifications page](https://csa-iot.org/developer-resource/specifications-download-request/):
@@ -233,3 +231,11 @@ This project implements the Zigbee PRO stack. The relevant specs are available (
 | SONOFF | Zigbee 3.0 USB Dongle Plus | — | coordinator | — | EFR32MG21 based. EZSP protocol. Used as the Zigbee coordinator. |
 | Sylvania | A19 70052 | — | light | On/Off, Level Control | — |
 <!-- /fsrc -->
+
+## Agent Skill
+
+This repo's conventions are available as portable agent skills in [`skills/`](skills/).
+
+## License
+
+[Apache-2.0](LICENSE)
